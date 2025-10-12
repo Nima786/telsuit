@@ -36,6 +36,7 @@ def _ensure_rotating_logs() -> None:
 
 _ensure_rotating_logs()
 
+
 # ============================================================
 # Helpers
 # ============================================================
@@ -64,15 +65,16 @@ def _extract_sku(text: str, keyword: str):
     return m.group(1).strip() if m else None
 
 
-def _pick_channel(config):
+def _pick_channel(config, label="channel"):
+    """Unified channel selector with a label."""
     channels = config.get("channels", [])
     if not channels:
         print_warning("No channels configured.")
         return None
-    print(f"\n{Colors.CYAN}--- Configured Channels ---{Colors.RESET}")
+    print(f"\n{Colors.CYAN}--- Select {label} ---{Colors.RESET}")
     for i, ch in enumerate(channels, start=1):
         print(f"{Colors.YELLOW}{i}.{Colors.RESET} {ch}")
-    sel = input("Select channel: ").strip()
+    sel = input("> ").strip()
     if not sel.isdigit() or not (1 <= int(sel) <= len(channels)):
         print("Invalid selection.")
         return None
@@ -297,35 +299,56 @@ async def _menu_delete_by_date(client, chat_id):
 
 
 # ============================================================
-# Forward / Copy
+# Improved Forward / Copy
 # ============================================================
 
 async def _menu_forward_copy(client, config):
-    src = _pick_channel(config)
+    """Forward, copy, or reupload messages between channels."""
+    src = _pick_channel(config, "source channel (copy from)")
     if not src:
         return
-    target = _pick_channel(config)
+    target = _pick_channel(config, "target channel (send to)")
     if not target:
         return
 
-    count = input("How many recent messages to transfer? [10]: ").strip()
+    print(f"\n{Colors.CYAN}--- Message Range ---{Colors.RESET}")
+    start_from = input("Start from message offset [0 = newest]: ").strip()
+    count = input("How many messages to transfer? [10]: ").strip()
     try:
+        start_from = int(start_from) if start_from else 0
         count = int(count) if count else 10
     except ValueError:
-        count = 10
+        print("Invalid input.")
+        return
+
+    print(f"\n{Colors.CYAN}--- Sort Order ---{Colors.RESET}")
+    print(f"{Colors.YELLOW}1.{Colors.RESET} Oldest to newest")
+    print(f"{Colors.YELLOW}2.{Colors.RESET} Newest to oldest")
+    order = input("> ").strip()
+    reverse = order == "2"
 
     print(f"\n{Colors.CYAN}--- Mode ---{Colors.RESET}")
     print(f"{Colors.YELLOW}1.{Colors.RESET} Forward (show sender)")
     print(f"{Colors.YELLOW}2.{Colors.RESET} Copy text only (hide sender)")
     print(f"{Colors.YELLOW}3.{Colors.RESET} Reupload media (hide sender)")
     mode = input("> ").strip()
-    sent = 0
+
+    print(
+        f"\nSource: {src}\nTarget: {target}\nCount: {count} (offset {start_from})\nMode: {mode}"
+    )
+    confirm = input("Proceed? (y/N): ").strip().lower()
+    if confirm != "y":
+        print("Cancelled.")
+        return
 
     msgs = []
-    async for m in client.iter_messages(src, limit=count):
+    async for m in client.iter_messages(src, limit=start_from + count):
         msgs.append(m)
-    msgs.reverse()
+    msgs = msgs[start_from : start_from + count]
+    if reverse:
+        msgs.reverse()
 
+    sent = 0
     for msg in msgs:
         try:
             if mode == "1":
@@ -341,7 +364,7 @@ async def _menu_forward_copy(client, config):
             await asyncio.sleep(0.3)
         except Exception as e:
             logger.error("Forward/copy failed: %s", e)
-    print_success(f"Sent {sent} messages to {target}.")
+    print_success(f"Transferred {sent} messages from {src} → {target}.")
 
 
 # ============================================================
@@ -402,7 +425,6 @@ async def start_cleaner(auto=False):
     )
     await client.start(phone=phone)
     if auto:
-        # Auto mode used only by enhancer integration
         pass
     else:
         await _interactive_menu(client, config)
