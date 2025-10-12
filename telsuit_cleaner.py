@@ -5,12 +5,10 @@ from telethon import TelegramClient, events
 from telethon.tl.types import Message
 from telsuit_core import (
     get_config,
-    save_config,
     logger,
     print_section,
     print_warning,
     print_success,
-    Colors,
 )
 
 
