@@ -1,0 +1,8 @@
+# Core runtime dependencies
+telethon==1.33.1
+colorama==0.4.6
+python-dotenv==1.0.1
+aiofiles==24.1.0
+
+# Developer tools (optional, for linting & CI)
+flake8==7.1.0
