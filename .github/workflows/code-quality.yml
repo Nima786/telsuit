@@ -1,0 +1,39 @@
+name: 🧩 Code Quality Checks
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  lint:
+    name: 🧹 Python & Shell Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      # ---- Python Setup & Lint ----
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: ⚙️ Install Python linters
+        run: |
+          python -m pip install --upgrade pip
+          pip install flake8
+
+      - name: 🔍 Run flake8 checks
+        run: |
+          echo "Running Python lint..."
+          flake8 . --count --max-line-length=100 --statistics
+
+      # ---- Shell Script Lint ----
+      - name: 🐚 Install ShellCheck
+        run: sudo apt-get install -y shellcheck
+
+
+  
