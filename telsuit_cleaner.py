@@ -1,7 +1,8 @@
-import asyncio
-import re
 from telethon import TelegramClient, events
-from telsuit_core import get_config, save_config, logger, print_section, print_warning, print_success
+from telsuit_core import (
+    get_config, save_config, logger,
+    print_section, print_warning, print_success
+)
 
 
 # --- 🧹 Telegram Cleaner Main Logic ---
@@ -65,7 +66,10 @@ async def start_cleaner(auto=False):
         for target_channel in config["cleaner"].get("forward_channels", []):
             try:
                 await client.forward_messages(target_channel, message)
-                logger.info(f"📤 Forwarded message {message.id} to {target_channel}")
+                logger.info(
+                    f"📤 Forwarded message {message.id} "
+                    f"to {target_channel}"
+                )
             except Exception as e:
                 logger.error(f"Failed to forward to {target_channel}: {e}")
 
@@ -83,7 +87,10 @@ async def start_cleaner(auto=False):
 def configure_cleaner():
     """Interactive configuration for cleaner settings."""
     config = get_config()
-    cleaner_cfg = config.get("cleaner", {"keywords": [], "forward_channels": [], "delete_rules": {}})
+    cleaner_cfg = config.get(
+        "cleaner",
+        {"keywords": [], "forward_channels": [], "delete_rules": {}}
+    )
 
     while True:
         print_section("Cleaner Configuration")
@@ -101,7 +108,9 @@ def configure_cleaner():
             else:
                 for i, kw in enumerate(cleaner_cfg["keywords"], start=1):
                     print(f"{i}. {kw}")
-            new_kw = input("Enter new keyword (or leave empty to go back): ").strip()
+            new_kw = input(
+                "Enter new keyword (or leave empty to go back): "
+            ).strip()
             if new_kw:
                 cleaner_cfg["keywords"].append(new_kw)
                 print_success(f"Added keyword '{new_kw}'")
@@ -111,16 +120,23 @@ def configure_cleaner():
             if not cleaner_cfg["forward_channels"]:
                 print_warning("No forward channels defined.")
             else:
-                for i, ch in enumerate(cleaner_cfg["forward_channels"], start=1):
+                for i, ch in enumerate(
+                    cleaner_cfg["forward_channels"], start=1
+                ):
                     print(f"{i}. {ch}")
-            new_ch = input("Enter new forward channel (e.g. @channelname): ").strip()
+            new_ch = input(
+                "Enter new forward channel (e.g. @channelname): "
+            ).strip()
             if new_ch:
                 cleaner_cfg["forward_channels"].append(new_ch)
                 print_success(f"Added forward channel {new_ch}")
 
         elif choice == '3':
             print_section("Delete Rules")
-            print("Example: delete posts older than 7 days or containing 'out of stock'")
+            print(
+                "Example: delete posts older than 7 days "
+                "or containing 'out of stock'"
+            )
             rule_name = input("Enter rule name: ").strip()
             rule_value = input("Enter rule details: ").strip()
             if rule_name and rule_value:
