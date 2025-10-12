@@ -11,9 +11,10 @@ async def run_config_editor(config):
         print(f"\n{Colors.CYAN}--- Shared Configuration Menu ---{Colors.RESET}")
         print(f"{Colors.YELLOW}1.{Colors.RESET} Add / Delete Admins")
         print(f"{Colors.YELLOW}2.{Colors.RESET} Add / Delete Channels")
-        print(f"{Colors.YELLOW}3.{Colors.RESET} Reset Configuration")
-        print(f"{Colors.YELLOW}4.{Colors.RESET} View Current Configuration")
-        print(f"{Colors.YELLOW}5.{Colors.RESET} Return to Main Menu")
+        print(f"{Colors.YELLOW}3.{Colors.RESET} Manage Emoji Map")
+        print(f"{Colors.YELLOW}4.{Colors.RESET} Reset Configuration")
+        print(f"{Colors.YELLOW}5.{Colors.RESET} View Current Configuration")
+        print(f"{Colors.YELLOW}6.{Colors.RESET} Return to Main Menu")
         choice = input("> ").strip()
 
         # --- Admin management ---
@@ -94,8 +95,53 @@ async def run_config_editor(config):
                 else:
                     print("Invalid choice.")
 
-        # --- Reset configuration ---
+        # --- Emoji map management ---
         elif choice == "3":
+            config.setdefault("emoji_map", {})
+            while True:
+                print(f"\n{Colors.CYAN}--- Manage Emoji Map ---{Colors.RESET}")
+                print(f"{Colors.YELLOW}1.{Colors.RESET} Add / Update Emoji ID")
+                print(f"{Colors.YELLOW}2.{Colors.RESET} Delete Emoji ID")
+                print(f"{Colors.YELLOW}3.{Colors.RESET} View Emoji Map")
+                print(f"{Colors.YELLOW}4.{Colors.RESET} Return")
+                sub_choice = input("> ").strip()
+
+                if sub_choice == "1":
+                    emoji = input("Enter standard emoji (e.g. 😊): ").strip()
+                    cid = input("Enter custom emoji ID: ").strip()
+                    config["emoji_map"][emoji] = cid
+                    save_config(config)
+                    print(f"{Colors.GREEN}✅ Emoji '{emoji}' mapped to ID {cid}.{Colors.RESET}")
+
+                elif sub_choice == "2":
+                    if not config["emoji_map"]:
+                        print("No emoji mappings exist.")
+                        continue
+                    print("\n--- Current Emoji Map ---")
+                    for i, (emoji, cid) in enumerate(config["emoji_map"].items(), start=1):
+                        print(f"{i}. {emoji} → ID: {cid}")
+                    idx = input("Select number to delete: ").strip()
+                    if idx.isdigit() and 1 <= int(idx) <= len(config["emoji_map"]):
+                        key = list(config["emoji_map"].keys())[int(idx) - 1]
+                        del config["emoji_map"][key]
+                        save_config(config)
+                        print(f"❌ Emoji '{key}' deleted.")
+                    else:
+                        print("Invalid selection.")
+                elif sub_choice == "3":
+                    if not config["emoji_map"]:
+                        print("No emoji mappings configured.")
+                    else:
+                        print("\n--- Current Emoji Map ---")
+                        for i, (emoji, cid) in enumerate(config["emoji_map"].items(), start=1):
+                            print(f"{i}. {emoji} → ID: {cid}")
+                elif sub_choice == "4":
+                    break
+                else:
+                    print("Invalid choice.")
+
+        # --- Reset configuration ---
+        elif choice == "4":
             confirm = input("Are you sure you want to reset everything? (y/N): ").strip()
             if confirm.lower() == "y":
                 config.clear()
@@ -106,7 +152,7 @@ async def run_config_editor(config):
                 print("Reset cancelled.")
 
         # --- View configuration ---
-        elif choice == "4":
+        elif choice == "5":
             print(f"\n{Colors.CYAN}--- Current Configuration ---{Colors.RESET}")
             admins = config.get("admins", {})
             channels = config.get("channels", [])
@@ -136,7 +182,7 @@ async def run_config_editor(config):
                 else:
                     print("No emoji mappings configured.")
 
-        elif choice == "5":
+        elif choice == "6":
             print("Returning to main menu...")
             break
         else:
