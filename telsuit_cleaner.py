@@ -2,8 +2,6 @@ from datetime import datetime, timedelta
 import asyncio
 import re
 import os
-import tempfile
-from typing import Iterable, Optional, List, Tuple
 from logging.handlers import RotatingFileHandler
 from telethon import TelegramClient, events
 from telethon.tl.types import Message
@@ -17,7 +15,10 @@ from telsuit_core import (
     Colors,
 )
 
-# --- Logging setup ---
+# ============================================================
+# Logging setup
+# ============================================================
+
 def _ensure_rotating_logs() -> None:
     """Prevent log files from growing indefinitely."""
     for h in list(logger.handlers):
@@ -29,41 +30,38 @@ def _ensure_rotating_logs() -> None:
         backupCount=3,
         encoding="utf-8",
     )
-    rotating.setFormatter(
-        logger.handlers[0].formatter if logger.handlers else None
-    )
+    rotating.setFormatter(logger.handlers[0].formatter if logger.handlers else None)
     logger.addHandler(rotating)
 
 
 _ensure_rotating_logs()
 
+# ============================================================
+# Helpers
+# ============================================================
 
-# -------------------------------
-# Helper functions
-# -------------------------------
 async def _delete_messages(client, chat_id, msg_ids, batch=50):
+    """Delete messages in small batches for safety."""
     deleted = 0
-    batch_list = []
+    buffer = []
     for mid in msg_ids:
-        batch_list.append(mid)
-        if len(batch_list) >= batch:
-            await client.delete_messages(chat_id, batch_list)
-            deleted += len(batch_list)
-            batch_list.clear()
-            await asyncio.sleep(0.5)
-    if batch_list:
-        await client.delete_messages(chat_id, batch_list)
-        deleted += len(batch_list)
+        buffer.append(mid)
+        if len(buffer) >= batch:
+            await client.delete_messages(chat_id, buffer)
+            deleted += len(buffer)
+            buffer.clear()
+            await asyncio.sleep(0.4)
+    if buffer:
+        await client.delete_messages(chat_id, buffer)
+        deleted += len(buffer)
     return deleted
 
 
-def _extract_sku(text: str, keyword: str) -> Optional[str]:
+def _extract_sku(text: str, keyword: str):
     """Extract SKU number following keyword."""
     pattern = rf"{re.escape(keyword)}\s*[:：\-_=]\s*([A-Za-z0-9_\-]+)"
-    match = re.search(pattern, text)
-    if match:
-        return match.group(1).strip()
-    return None
+    m = re.search(pattern, text)
+    return m.group(1).strip() if m else None
 
 
 def _pick_channel(config):
@@ -81,11 +79,12 @@ def _pick_channel(config):
     return channels[int(sel) - 1]
 
 
-# -------------------------------
+# ============================================================
 # Auto trigger by enhancer
-# -------------------------------
+# ============================================================
+
 async def run_duplicate_check_for_event(client, config, event):
-    """Triggered automatically after enhancer edits a post."""
+    """Triggered automatically by enhancer after emoji conversion."""
     keywords = config.get("cleaner", {}).get("keywords", [])
     if not keywords:
         return
@@ -115,11 +114,12 @@ async def run_duplicate_check_for_event(client, config, event):
             return
 
 
-# -------------------------------
-# Interactive functions
-# -------------------------------
+# ============================================================
+# Keyword Management
+# ============================================================
+
 async def _menu_manage_keywords(config):
-    """Add/Delete/View keywords in shared cleaner section."""
+    """Add/Delete/View keywords."""
     cleaner_cfg = config.setdefault("cleaner", {})
     keywords = cleaner_cfg.setdefault("keywords", [])
     while True:
@@ -129,6 +129,7 @@ async def _menu_manage_keywords(config):
         print(f"{Colors.YELLOW}3.{Colors.RESET} View keywords")
         print(f"{Colors.YELLOW}4.{Colors.RESET} Return")
         choice = input("> ").strip()
+
         if choice == "1":
             kw = input("Enter keyword (e.g. شناسه محصول): ").strip()
             if kw and kw not in keywords:
@@ -161,7 +162,12 @@ async def _menu_manage_keywords(config):
             print("Invalid selection.")
 
 
+# ============================================================
+# Duplicate & Delete Functions
+# ============================================================
+
 async def _menu_remove_duplicates(client, chat_id, keywords):
+    """Remove duplicates based on SKU extracted from configured keywords."""
     if not keywords:
         print_warning("No keywords defined. Add one first.")
         return
@@ -174,9 +180,9 @@ async def _menu_remove_duplicates(client, chat_id, keywords):
         return
     keyword = keywords[int(sel) - 1]
 
-    print("Scanning posts...")
+    print("Scanning posts for duplicates...")
     groups = {}
-    async for msg in client.iter_messages(chat_id, limit=600):
+    async for msg in client.iter_messages(chat_id, limit=1000):
         text = msg.raw_text or ""
         sku = _extract_sku(text, keyword)
         if sku:
@@ -210,18 +216,19 @@ async def _menu_remove_duplicates(client, chat_id, keywords):
 
 
 async def _menu_delete_by_keyword(client, chat_id):
+    """Delete all messages containing a given keyword."""
     kw = input("Enter keyword: ").strip()
     if not kw:
         print("No keyword entered.")
         return
     ids = []
-    async for msg in client.iter_messages(chat_id, limit=300):
+    async for msg in client.iter_messages(chat_id, limit=400):
         if kw.lower() in (msg.raw_text or "").lower():
             ids.append(msg.id)
     if not ids:
         print_warning("No matches.")
         return
-    confirm = input(f"Delete {len(ids)} messages? (y/N): ").strip().lower()
+    confirm = input(f"Delete {len(ids)} messages containing '{kw}'? (y/N): ").strip().lower()
     if confirm != "y":
         print("Cancelled.")
         return
@@ -229,28 +236,96 @@ async def _menu_delete_by_keyword(client, chat_id):
     print_success(f"Deleted {deleted} messages.")
 
 
-async def _menu_forward_copy(client, chat_id):
-    target = input("Target channel (e.g. @backup): ").strip()
-    if not target:
-        print("No target provided.")
+async def _menu_delete_by_date(client, chat_id):
+    """Delete messages using multiple date-based modes."""
+    print(f"\n{Colors.CYAN}--- Delete by Date Options ---{Colors.RESET}")
+    print(f"{Colors.YELLOW}1.{Colors.RESET} Older than N days")
+    print(f"{Colors.YELLOW}2.{Colors.RESET} Between two dates")
+    print(f"{Colors.YELLOW}3.{Colors.RESET} Before specific date")
+    print(f"{Colors.YELLOW}4.{Colors.RESET} Last N messages (quick)")
+    print(f"{Colors.YELLOW}5.{Colors.RESET} Return")
+    choice = input("> ").strip()
+    now = datetime.utcnow()
+    ids = []
+
+    if choice == "1":
+        days = int(input("Delete messages older than how many days?: ").strip())
+        cutoff = now - timedelta(days=days)
+        async for msg in client.iter_messages(chat_id, limit=1500):
+            if msg.date and msg.date.replace(tzinfo=None) < cutoff:
+                ids.append(msg.id)
+        note = f"older than {days} days"
+
+    elif choice == "2":
+        s = input("Start date (YYYY-MM-DD): ").strip()
+        e = input("End date (YYYY-MM-DD): ").strip()
+        start = datetime.strptime(s, "%Y-%m-%d")
+        end = datetime.strptime(e, "%Y-%m-%d")
+        async for msg in client.iter_messages(chat_id, limit=2000):
+            if msg.date and start <= msg.date.replace(tzinfo=None) <= end:
+                ids.append(msg.id)
+        note = f"between {s} and {e}"
+
+    elif choice == "3":
+        cutoff = datetime.strptime(input("Delete before (YYYY-MM-DD): ").strip(), "%Y-%m-%d")
+        async for msg in client.iter_messages(chat_id, limit=2000):
+            if msg.date and msg.date.replace(tzinfo=None) < cutoff:
+                ids.append(msg.id)
+        note = f"before {cutoff.date()}"
+
+    elif choice == "4":
+        n = int(input("How many recent messages to delete?: ").strip())
+        async for msg in client.iter_messages(chat_id, limit=n):
+            ids.append(msg.id)
+        note = f"last {n} messages"
+
+    elif choice == "5":
         return
-    count = input("How many messages? [10]: ").strip()
+    else:
+        print("Invalid option.")
+        return
+
+    if not ids:
+        print_warning("No matching messages found.")
+        return
+    confirm = input(f"Delete {len(ids)} messages {note}? (y/N): ").strip().lower()
+    if confirm != "y":
+        print("Cancelled.")
+        return
+    deleted = await _delete_messages(client, chat_id, ids)
+    print_success(f"Deleted {deleted} messages {note}.")
+
+
+# ============================================================
+# Forward / Copy
+# ============================================================
+
+async def _menu_forward_copy(client, config):
+    src = _pick_channel(config)
+    if not src:
+        return
+    target = _pick_channel(config)
+    if not target:
+        return
+
+    count = input("How many recent messages to transfer? [10]: ").strip()
     try:
         count = int(count) if count else 10
     except ValueError:
         count = 10
+
     print(f"\n{Colors.CYAN}--- Mode ---{Colors.RESET}")
     print(f"{Colors.YELLOW}1.{Colors.RESET} Forward (show sender)")
     print(f"{Colors.YELLOW}2.{Colors.RESET} Copy text only (hide sender)")
     print(f"{Colors.YELLOW}3.{Colors.RESET} Reupload media (hide sender)")
     mode = input("> ").strip()
+    sent = 0
 
     msgs = []
-    async for m in client.iter_messages(chat_id, limit=count):
+    async for m in client.iter_messages(src, limit=count):
         msgs.append(m)
     msgs.reverse()
 
-    sent = 0
     for msg in msgs:
         try:
             if mode == "1":
@@ -265,39 +340,24 @@ async def _menu_forward_copy(client, chat_id):
             sent += 1
             await asyncio.sleep(0.3)
         except Exception as e:
-            logger.error("Forward error: %s", e)
+            logger.error("Forward/copy failed: %s", e)
     print_success(f"Sent {sent} messages to {target}.")
 
 
-# -------------------------------
-# Live monitor
-# -------------------------------
-async def _start_live_monitor(client, config):
-    async def on_new_message(event):
-        await run_duplicate_check_for_event(client, config, event)
+# ============================================================
+# Interactive Menu
+# ============================================================
 
-    for ch in config.get("channels", []):
-        client.add_event_handler(on_new_message, events.NewMessage(chats=ch))
-        logger.info("Cleaner live-monitoring %s", ch)
-    try:
-        await client.run_until_disconnected()
-    except KeyboardInterrupt:
-        print("\nStopped live monitor.")
-
-
-# -------------------------------
-# Entry points
-# -------------------------------
 async def _interactive_menu(client, config):
     while True:
         print_section("Channel Cleaner Menu")
         print(f"{Colors.YELLOW}1.{Colors.RESET} Remove duplicate posts")
         print(f"{Colors.YELLOW}2.{Colors.RESET} Delete by keyword")
-        print(f"{Colors.YELLOW}3.{Colors.RESET} Manage keywords")
-        print(f"{Colors.YELLOW}4.{Colors.RESET} Forward / Copy posts")
-        print(f"{Colors.YELLOW}5.{Colors.RESET} View cleaner settings")
-        print(f"{Colors.YELLOW}6.{Colors.RESET} Start monitoring (new posts)")
-        print(f"{Colors.YELLOW}7.{Colors.RESET} Return")
+        print(f"{Colors.YELLOW}3.{Colors.RESET} Delete by date")
+        print(f"{Colors.YELLOW}4.{Colors.RESET} Manage keywords")
+        print(f"{Colors.YELLOW}5.{Colors.RESET} Forward / Copy posts")
+        print(f"{Colors.YELLOW}6.{Colors.RESET} View cleaner settings")
+        print(f"{Colors.YELLOW}7.{Colors.RESET} Return to TelSuit")
 
         choice = input("> ").strip()
         if choice == "1":
@@ -310,21 +370,24 @@ async def _interactive_menu(client, config):
             if ch:
                 await _menu_delete_by_keyword(client, ch)
         elif choice == "3":
-            await _menu_manage_keywords(config)
-        elif choice == "4":
             ch = _pick_channel(config)
             if ch:
-                await _menu_forward_copy(client, ch)
+                await _menu_delete_by_date(client, ch)
+        elif choice == "4":
+            await _menu_manage_keywords(config)
         elif choice == "5":
-            print(config.get("cleaner", {}))
+            await _menu_forward_copy(client, config)
         elif choice == "6":
-            print("Listening for new posts...")
-            await _start_live_monitor(client, config)
+            print(config.get("cleaner", {}))
         elif choice == "7":
             break
         else:
-            print("Invalid choice.")
+            print("Invalid option.")
 
+
+# ============================================================
+# Entrypoint
+# ============================================================
 
 async def start_cleaner(auto=False):
     config = get_config()
@@ -334,11 +397,13 @@ async def start_cleaner(auto=False):
         return
     phone = admins[0]
     creds = config["admins"][phone]
-    client = TelegramClient(f"cleaner_{phone}.session", int(creds["api_id"]),
-                            creds["api_hash"])
+    client = TelegramClient(
+        f"cleaner_{phone}.session", int(creds["api_id"]), creds["api_hash"]
+    )
     await client.start(phone=phone)
     if auto:
-        await _start_live_monitor(client, config)
+        # Auto mode used only by enhancer integration
+        pass
     else:
         await _interactive_menu(client, config)
 
