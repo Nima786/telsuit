@@ -1,19 +1,19 @@
 # telsuit_cleaner.py
 # TelSuit — Channel Cleaner module
 # --------------------------------
-# - Duplicate sweep (manual + auto on new posts via enhancer hook)
-# - Delete by keyword / age
+# - Duplicate sweep (by SKU after a chosen keyword)
+# - Delete by keyword
 # - Forward / copy messages
-# - Persistent "cleaner" settings (keywords) in shared config
-# - Rotating logs to avoid growth
-# - Flake8-compliant
+# - Persistent cleaner settings (keywords)
+# - Enhancer hook: dedupe after edit by keyword+SKU
+# - Rotating logs; flake8-friendly
 
 from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timedelta
 from logging.handlers import RotatingFileHandler
-from typing import Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional, Tuple
 
 from telethon import TelegramClient, events
 from telethon.tl.types import Message
@@ -27,12 +27,12 @@ from telsuit_core import (
     print_success,
 )
 
-# -----------------------------------------------------------------------------
-# Logging: ensure rotating file handler (1 MB x 3 files) to avoid log bloat
-# -----------------------------------------------------------------------------
+# --------------------------------------------------------------------------
+# Logging: avoid log bloat
+# --------------------------------------------------------------------------
 
 def _ensure_rotating_logs() -> None:
-    """Swap any plain FileHandler with RotatingFileHandler (1MB x 3 files)."""
+    """Switch to RotatingFileHandler (1 MB x 3 files) if needed."""
     need_add = True
     for h in list(logger.handlers):
         if isinstance(h, RotatingFileHandler):
@@ -55,45 +55,88 @@ def _ensure_rotating_logs() -> None:
 
 _ensure_rotating_logs()
 
-
-# -----------------------------------------------------------------------------
+# --------------------------------------------------------------------------
 # Config helpers
-# -----------------------------------------------------------------------------
+# --------------------------------------------------------------------------
 
 def _ensure_cleaner_config(config: dict) -> dict:
-    """Make sure 'cleaner' key exists with expected structure."""
+    """Ensure structure and default keys for 'cleaner' config."""
     cleaner = config.get("cleaner")
     if not isinstance(cleaner, dict):
         cleaner = {}
         config["cleaner"] = cleaner
-
-    cleaner.setdefault("keywords", [])           # list[str]
-    cleaner.setdefault("forward_channels", [])   # reserved for future
-    cleaner.setdefault("delete_rules", {})       # reserved for future
+    cleaner.setdefault("keywords", [])
+    cleaner.setdefault("forward_channels", [])
+    cleaner.setdefault("delete_rules", {})
     return cleaner
 
 
 def _persist_keywords(config: dict, keywords: Iterable[str]) -> None:
     cleaner = _ensure_cleaner_config(config)
-    # Normalize: trim, dedupe, keep non-empty
-    normalized = []
+    normalized: List[str] = []
     seen = set()
-    for kw in (kw.strip() for kw in keywords):
+    for kw in (k.strip() for k in keywords):
         if kw and kw.lower() not in seen:
             normalized.append(kw)
             seen.add(kw.lower())
     cleaner["keywords"] = normalized
     save_config(config)
 
+# --------------------------------------------------------------------------
+# Keyword + SKU utilities
+# --------------------------------------------------------------------------
 
-# -----------------------------------------------------------------------------
-# Telegram utilities
-# -----------------------------------------------------------------------------
+def _select_keyword(config: dict, prompt: str) -> Optional[str]:
+    """List stored keywords and let user pick or enter custom."""
+    cleaner = _ensure_cleaner_config(config)
+    kws: List[str] = list(cleaner.get("keywords", []))
+
+    if not kws:
+        # no stored keywords – ask for manual entry
+        value = input(f"{prompt} (type keyword): ").strip()
+        return value or None
+
+    print("\n--- Available Keywords ---")
+    for i, k in enumerate(kws, start=1):
+        print(f"{i}. {k}")
+    print("0. Enter custom keyword")
+
+    choice = input(f"{prompt} [1-{len(kws)} or 0]: ").strip()
+    if choice == "0":
+        value = input("Enter custom keyword: ").strip()
+        return value or None
+
+    if choice.isdigit() and 1 <= int(choice) <= len(kws):
+        return kws[int(choice) - 1]
+
+    print("Invalid selection.")
+    return None
+
+
+def _extract_sku(text: str, keyword: str) -> Optional[str]:
+    """
+    Extract SKU appearing after the keyword, e.g.:
+       '... شناسه محصول: 127'
+    Accept standard ':' or full-width '：'; allow letters, digits, '_' or '-'.
+    """
+    import re as _re
+
+    pattern = rf"{_re.escape(keyword)}\s*[:：]\s*([A-Za-z0-9_\-]+)"
+    m = _re.search(pattern, text, flags=_re.IGNORECASE)
+    if not m:
+        # Try permissive digits-only fallback (covers Arabic-Indic digits too)
+        m = _re.search(
+            rf"{_re.escape(keyword)}\s*[:：]\s*([\d]+)", text, flags=_re.IGNORECASE
+        )
+    return m.group(1) if m else None
+
+# --------------------------------------------------------------------------
+# Telegram helpers
+# --------------------------------------------------------------------------
 
 async def _delete_messages(
     client: TelegramClient, chat_id: str, msg_ids: Iterable[int]
 ) -> int:
-    """Delete messages in small batches to respect Telegram limits."""
     deleted = 0
     batch: List[int] = []
     for mid in msg_ids:
@@ -109,30 +152,52 @@ async def _delete_messages(
     return deleted
 
 
-async def _search_duplicates(
+async def _search_by_sku(
     client: TelegramClient,
     chat_id: str,
     keyword: str,
+    sku: str,
     keep_latest_id: Optional[int],
-    scan_limit: int = 300,
+    scan_limit: int = 400,
 ) -> List[int]:
     """
-    Find messages containing `keyword`. Return IDs to delete.
-    If keep_latest_id is provided, exclude it from results.
+    Return message IDs that contain BOTH the keyword and the same SKU value.
+    Excludes keep_latest_id when provided.
     """
-    to_delete: List[int] = []
-    async for msg in client.iter_messages(chat_id, search=keyword, limit=scan_limit):
+    matches: List[int] = []
+    async for msg in client.iter_messages(chat_id, search=sku, limit=scan_limit):
         if isinstance(msg, Message):
             text = (msg.raw_text or "")
-            if keyword.lower() in text.lower():
+            if keyword.lower() in text.lower() and sku in text:
                 if keep_latest_id is None or msg.id != keep_latest_id:
-                    to_delete.append(msg.id)
-    return to_delete
+                    matches.append(msg.id)
+    return matches
 
 
-# -----------------------------------------------------------------------------
-# Enhancer hook (called right after successful emoji enhancement)
-# -----------------------------------------------------------------------------
+async def _build_sku_groups(
+    client: TelegramClient,
+    chat_id: str,
+    keyword: str,
+    scan_limit: int = 500,
+) -> Dict[str, List[int]]:
+    """
+    Scan recent posts for the given keyword and extract SKUs, grouped as:
+        { sku_value: [msg_id1, msg_id2, ...] }
+    """
+    groups: Dict[str, List[int]] = {}
+    async for msg in client.iter_messages(chat_id, search=keyword, limit=scan_limit):
+        if not isinstance(msg, Message):
+            continue
+        text = msg.raw_text or ""
+        sku = _extract_sku(text, keyword)
+        if not sku:
+            continue
+        groups.setdefault(sku, []).append(msg.id)
+    return groups
+
+# --------------------------------------------------------------------------
+# Enhancer hook — called AFTER a message is edited by enhancer
+# --------------------------------------------------------------------------
 
 async def run_duplicate_check_for_event(
     client: TelegramClient,
@@ -140,9 +205,10 @@ async def run_duplicate_check_for_event(
     event,
 ) -> None:
     """
-    Lightweight duplicate sweep triggered by the enhancer AFTER edit.
-    - Look for the first configured keyword present in the edited message
-    - Delete older duplicates, keep the just-edited message
+    After enhancer edit:
+      - find first configured keyword present in text
+      - extract SKU after that keyword
+      - delete older posts with the same keyword+SKU (keep current)
     """
     cleaner = _ensure_cleaner_config(config)
     keywords: List[str] = cleaner.get("keywords", [])
@@ -154,42 +220,45 @@ async def run_duplicate_check_for_event(
     if not text:
         return
 
-    matched = None
+    chosen_kw = None
+    sku = None
     for kw in keywords:
-        if kw and kw.lower() in text.lower():
-            matched = kw
-            break
-    if not matched:
+        if kw.lower() in text.lower():
+            sku = _extract_sku(text, kw)
+            if sku:
+                chosen_kw = kw
+                break
+    if not chosen_kw or not sku:
         return
 
-    chat_id = event.chat_id
     try:
-        dup_ids = await _search_duplicates(
+        ids = await _search_by_sku(
             client=client,
-            chat_id=chat_id,
-            keyword=matched,
+            chat_id=event.chat_id,
+            keyword=chosen_kw,
+            sku=sku,
             keep_latest_id=msg.id,
             scan_limit=300,
         )
-        if not dup_ids:
+        if not ids:
             return
 
-        deleted = await _delete_messages(client, chat_id, dup_ids)
+        deleted = await _delete_messages(client, event.chat_id, ids)
         if deleted:
             logger.info(
-                "Cleaner(auto): removed %d duplicates for '%s' in %s (kept %s)",
+                "Cleaner(auto): removed %d dups for '%s: %s' in chat %s (kept %s)",
                 deleted,
-                matched,
-                chat_id,
+                chosen_kw,
+                sku,
+                event.chat_id,
                 msg.id,
             )
     except Exception as exc:
         logger.error("Cleaner(auto) failed: %s", exc)
 
-
-# -----------------------------------------------------------------------------
-# Interactive ops (menu actions)
-# -----------------------------------------------------------------------------
+# --------------------------------------------------------------------------
+# Interactive actions
+# --------------------------------------------------------------------------
 
 def _pick_channel(config: dict) -> Optional[str]:
     channels = config.get("channels", [])
@@ -208,36 +277,55 @@ def _pick_channel(config: dict) -> Optional[str]:
 
 
 async def _menu_remove_duplicates(client: TelegramClient, chat_id: str) -> None:
-    kw = input("Keyword / SKU to deduplicate by: ").strip()
-    if not kw:
-        print("No keyword entered.")
+    config = get_config()
+    keyword = _select_keyword(config, "Choose keyword for SKU extraction")
+    if not keyword:
         return
 
-    print("Searching duplicates...")
-    dup_ids = await _search_duplicates(client, chat_id, kw, keep_latest_id=None)
-    if not dup_ids:
-        print_success("No duplicates found.")
+    print("Scanning recent posts and grouping by SKU...")
+    groups = await _build_sku_groups(client, chat_id, keyword, scan_limit=600)
+    if not groups:
+        print_warning("Found no SKUs with that keyword.")
         return
 
-    keep_id = max(dup_ids)
-    to_delete = [mid for mid in dup_ids if mid != keep_id]
+    # Build deletion plan per SKU (keep newest id)
+    plan: List[Tuple[str, List[int], int]] = []
+    total_delete = 0
+    for sku, ids in groups.items():
+        ids_sorted = sorted(ids)
+        keep_id = ids_sorted[-1]
+        to_delete = [m for m in ids_sorted if m != keep_id]
+        if to_delete:
+            total_delete += len(to_delete)
+            plan.append((sku, to_delete, keep_id))
 
-    print(f"Found {len(dup_ids)} matching posts. "
-          f"Will keep newest (id {keep_id}) and delete {len(to_delete)}.")
+    if not plan:
+        print_success("All SKUs are unique already. Nothing to delete.")
+        return
+
+    print("\n=== Duplicate Summary ===")
+    for sku, to_delete, keep_id in plan:
+        print(f"SKU {sku}: delete {len(to_delete)}, keep {keep_id}")
+    print(f"Total messages to delete: {total_delete}")
+
     confirm = input("Proceed with deletion? [y/N]: ").strip().lower()
     if confirm != "y":
         print("Cancelled.")
         return
 
-    deleted = await _delete_messages(client, chat_id, to_delete)
-    print_success(f"Deleted {deleted} messages. Kept {keep_id}.")
+    deleted_total = 0
+    for _, to_delete, _ in plan:
+        deleted_total += await _delete_messages(client, chat_id, to_delete)
+
+    print_success(f"Deleted {deleted_total} messages across {len(plan)} SKUs.")
 
 
 async def _menu_delete_by_keyword(client: TelegramClient, chat_id: str) -> None:
-    kw = input("Keyword to delete: ").strip()
-    if not kw:
-        print("No keyword entered.")
+    config = get_config()
+    keyword = _select_keyword(config, "Choose keyword to delete")
+    if not keyword:
         return
+
     limit_str = input("How many recent messages to scan? [200]: ").strip()
     try:
         limit = int(limit_str) if limit_str else 200
@@ -247,21 +335,21 @@ async def _menu_delete_by_keyword(client: TelegramClient, chat_id: str) -> None:
     ids: List[int] = []
     async for msg in client.iter_messages(chat_id, limit=limit):
         text = (msg.raw_text or "")
-        if kw.lower() in text.lower():
+        if keyword.lower() in text.lower():
             ids.append(msg.id)
 
     if not ids:
         print_warning("Nothing matched.")
         return
 
-    print(f"Matched {len(ids)} messages containing '{kw}'.")
+    print(f"Matched {len(ids)} messages containing '{keyword}'.")
     confirm = input("Delete them? [y/N]: ").strip().lower()
     if confirm != "y":
         print("Cancelled.")
         return
 
     deleted = await _delete_messages(client, chat_id, ids)
-    print_success(f"Deleted {deleted} messages containing '{kw}'.")
+    print_success(f"Deleted {deleted} messages containing '{keyword}'.")
 
 
 async def _menu_delete_by_age(client: TelegramClient, chat_id: str) -> None:
@@ -275,7 +363,7 @@ async def _menu_delete_by_age(client: TelegramClient, chat_id: str) -> None:
     cutoff = datetime.utcnow() - timedelta(days=days)
     ids: List[int] = []
 
-    async for msg in client.iter_messages(chat_id, limit=500):
+    async for msg in client.iter_messages(chat_id, limit=600):
         if msg.date and msg.date.replace(tzinfo=None) < cutoff:
             ids.append(msg.id)
 
@@ -298,6 +386,7 @@ async def _menu_forward_copy(client: TelegramClient, chat_id: str) -> None:
     if not target:
         print("No target provided.")
         return
+
     count_str = input("How many recent messages to send? [10]: ").strip()
     try:
         count = int(count_str) if count_str else 10
@@ -323,9 +412,11 @@ async def _menu_forward_copy(client: TelegramClient, chat_id: str) -> None:
 
     print_success(f"Sent {sent} messages to {target}.")
 
+# --------------------------------------------------------------------------
+# Cleaner settings editor (keywords)
+# --------------------------------------------------------------------------
 
 def _menu_cleaner_settings(config: dict) -> None:
-    """Manage persistent cleaner settings (currently just keywords)."""
     while True:
         print("\n==============================")
         print("      Cleaner Settings")
@@ -374,10 +465,9 @@ def _menu_cleaner_settings(config: dict) -> None:
         else:
             print("Invalid option.")
 
-
-# -----------------------------------------------------------------------------
-# Live monitor: NEW posts only (for interactive and service modes)
-# -----------------------------------------------------------------------------
+# --------------------------------------------------------------------------
+# Live monitor for NEW posts (interactive + service)
+# --------------------------------------------------------------------------
 
 async def _start_live_monitor(client: TelegramClient, config: dict) -> None:
     async def on_new_message(event):
@@ -395,10 +485,9 @@ async def _start_live_monitor(client: TelegramClient, config: dict) -> None:
     except KeyboardInterrupt:
         print("\nStopped live monitor.")
 
-
-# -----------------------------------------------------------------------------
-# Interactive menu shell
-# -----------------------------------------------------------------------------
+# --------------------------------------------------------------------------
+# Interactive shell
+# --------------------------------------------------------------------------
 
 async def _interactive_menu(client: TelegramClient, config: dict) -> None:
     while True:
@@ -447,16 +536,15 @@ async def _interactive_menu(client: TelegramClient, config: dict) -> None:
         else:
             print("Invalid option.")
 
-
-# -----------------------------------------------------------------------------
+# --------------------------------------------------------------------------
 # Public entrypoints
-# -----------------------------------------------------------------------------
+# --------------------------------------------------------------------------
 
 async def start_cleaner(auto: bool = False) -> None:
     """
     Main cleaner entry point.
       * auto=False → open interactive menu
-      * auto=True  → headless: live monitor for new posts (service usage)
+      * auto=True  → live monitor for new posts (service usage)
     """
     config = get_config()
     admins = list(config.get("admins", {}).keys())
@@ -481,9 +569,5 @@ async def start_cleaner(auto: bool = False) -> None:
 
 
 async def run_cleaner(config: Optional[dict] = None, auto: bool = False) -> None:
-    """
-    Wrapper used by TelSuit main menu.
-    The config param is accepted for symmetry but the cleaner re-reads config
-    internally to ensure fresh state when called headless.
-    """
+    """Wrapper used by TelSuit main menu."""
     await start_cleaner(auto=auto)
