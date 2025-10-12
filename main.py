@@ -1,80 +1,64 @@
-#!/usr/bin/env python3
-"""
-TelSuit — Telegram Automation Suite
------------------------------------
-A unified toolkit for managing Telegram channels:
-• Emoji Enhancer — converts standard emojis to custom ones
-• Channel Cleaner — removes duplicate or unwanted posts
-• Designed for automation and stability
-"""
-
-import sys
 import asyncio
-import logging
-from colorama import Fore, Style
-
-# --- 🧩 Modules (to be added later) ---
-# from enhancer import start_enhancer
-# from cleaner import start_cleaner
+import sys
+from telsuit_core import Colors, load_config, save_config
+from telsuit_enhancer import run_enhancer
+from telsuit_cleaner import run_cleaner
 
 
-# --- 🎨 UI Colors ---
-class Colors:
-    GREEN = Fore.GREEN
-    YELLOW = Fore.YELLOW
-    CYAN = Fore.CYAN
-    RED = Fore.RED
-    BOLD = Style.BRIGHT
-    RESET = Style.RESET_ALL
+async def run_config_editor(config):
+    """Temporary shared config editor (basic stub)."""
+    print(f"\n{Colors.CYAN}--- Shared Config Editor ---{Colors.RESET}")
+    print(f"{Colors.YELLOW}1.{Colors.RESET} View Config")
+    print(f"{Colors.YELLOW}2.{Colors.RESET} Reset Config")
+    print(f"{Colors.YELLOW}3.{Colors.RESET} Return to Main Menu")
+    choice = input("> ")
+
+    if choice == "1":
+        print("\n--- Current Configuration ---")
+        print(config)
+    elif choice == "2":
+        confirm = input("Are you sure you want to reset all configs? (y/N): ")
+        if confirm.lower() == "y":
+            config.clear()
+            config.update({"admins": {}, "channels": [], "emoji_map": {}})
+            save_config(config)
+            print(f"{Colors.GREEN}✅ Configuration reset.{Colors.RESET}")
+    else:
+        print("Returning to main menu...")
 
 
-# --- ⚙️ Logging setup ---
-logging.basicConfig(
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    level=logging.INFO,
-)
-logger = logging.getLogger("TelSuit")
+async def main():
+    """Main TelSuit control hub."""
+    config = load_config()
 
-
-# --- 🧠 Main menu ---
-async def main_menu():
     while True:
-        print(f"\n{Colors.BOLD}{Colors.CYAN}==============================")
-        print("         TelSuit Main Menu")
+        print(f"\n{Colors.BOLD}{Colors.GREEN}==============================")
+        print("        TelSuit Main Menu")
         print("==============================")
         print(f"{Colors.YELLOW}1.{Colors.RESET} Emoji Enhancer Module")
         print(f"{Colors.YELLOW}2.{Colors.RESET} Channel Cleaner Module")
         print(f"{Colors.YELLOW}3.{Colors.RESET} Settings / Config")
         print(f"{Colors.YELLOW}4.{Colors.RESET} Exit")
         print("------------------------------")
-
         choice = input("Select an option: ").strip()
 
         if choice == "1":
-            print(f"{Colors.GREEN}Launching Emoji Enhancer...{Colors.RESET}")
-            # await start_enhancer()  ← to be added later
+            print(f"{Colors.CYAN}Launching Emoji Enhancer...{Colors.RESET}")
+            await run_enhancer(config)
         elif choice == "2":
-            print(f"{Colors.GREEN}Launching Channel Cleaner...{Colors.RESET}")
-            # await start_cleaner()  ← to be added later
+            print(f"{Colors.CYAN}Launching Channel Cleaner...{Colors.RESET}")
+            await run_cleaner(config)
         elif choice == "3":
-            print(f"{Colors.YELLOW}Config editor coming soon...{Colors.RESET}")
+            await run_config_editor(config)
         elif choice == "4":
-            print(f"{Colors.RED}Exiting TelSuit. Goodbye!{Colors.RESET}")
-            break
+            print(f"{Colors.YELLOW}Exiting TelSuit. Goodbye!{Colors.RESET}")
+            sys.exit(0)
         else:
-            print(f"{Colors.RED}Invalid selection, please try again.{Colors.RESET}")
+            print("Invalid option. Try again.")
 
 
-# --- 🚀 Headless (background) mode ---
-async def run_headless():
-    """Used by systemd to run automatically without menus."""
-    logger.info("Running TelSuit in headless mode.")
-    # await start_enhancer(auto=True)  ← will default to Enhancer
-
-
-# --- 🏁 Entry point ---
 if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] == "--headless":
-        asyncio.run(run_headless())
-    else:
-        asyncio.run(main_menu())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print(f"\n{Colors.YELLOW}Exited by user.{Colors.RESET}")
