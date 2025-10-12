@@ -150,7 +150,7 @@ async def run_config_editor(config):
                 print(f"{Colors.GREEN}✅ Configuration reset.{Colors.RESET}")
             else:
                 print("Reset cancelled.")
-
+                
         # --- View configuration ---
         elif choice == "5":
             print(f"\n{Colors.CYAN}--- Current Configuration ---{Colors.RESET}")
