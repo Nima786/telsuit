@@ -1,9 +1,7 @@
-import asyncio
-import logging
 import re
 from telethon import TelegramClient, events
 from telethon.tl.types import MessageEntityCustomEmoji
-from telsuit_core import Colors, get_config, save_config, logger
+from telsuit_core import get_config, logger
 
 
 # --- 🎨 Emoji Enhancer Logic ---
