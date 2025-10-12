@@ -2,6 +2,7 @@ import re
 from telethon import TelegramClient, events
 from telethon.tl.types import MessageEntityCustomEmoji
 from telsuit_core import get_config, logger
+from telsuit_cleaner import run_duplicate_check_for_event
 
 
 # --- 🎨 Emoji Enhancer Logic ---
@@ -78,7 +79,14 @@ async def start_enhancer(auto=False):
 
         try:
             await event.edit(parsed_text, formatting_entities=final_entities)
-            logger.info(f"✅ Enhanced message {event.message.id} in {event.chat.username}")
+            logger.info(
+                f"✅ Enhanced message {event.message.id} in {event.chat.username}"
+            )
+
+            # 🔁 Automatically trigger Cleaner duplicate check
+            await run_duplicate_check_for_event(client, config, event)
+            logger.info("🧹 Cleaner check triggered after enhancement.")
+
         except Exception as e:
             logger.error(f"❌ Failed editing message {event.message.id}: {e}")
 
