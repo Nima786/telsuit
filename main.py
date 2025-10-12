@@ -1,6 +1,6 @@
 import asyncio
 import sys
-from telsuit_core import Colors, load_config, save_config
+from telsuit_core import Colors, get_config as load_config, save_config
 from telsuit_enhancer import run_enhancer
 from telsuit_cleaner import run_cleaner
 
