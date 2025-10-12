@@ -133,7 +133,9 @@ async def run_config_editor(config):
                         print("No emoji mappings configured.")
                     else:
                         print("\n--- Current Emoji Map ---")
-                        for i, (emoji, cid) in enumerate(config["emoji_map"].items(), start=1):
+                        for i, (emoji, cid) in enumerate(
+                            config["emoji_map"].items(), start=1
+                        ):
                             print(f"{i}. {emoji} → ID: {cid}")
                 elif sub_choice == "4":
                     break
@@ -142,7 +144,9 @@ async def run_config_editor(config):
 
         # --- Reset configuration ---
         elif choice == "4":
-            confirm = input("Are you sure you want to reset everything? (y/N): ").strip()
+            confirm = input(
+                "Are you sure you want to reset everything? (y/N): "
+            ).strip()
             if confirm.lower() == "y":
                 config.clear()
                 config.update({"admins": {}, "channels": [], "emoji_map": {}})
@@ -150,7 +154,7 @@ async def run_config_editor(config):
                 print(f"{Colors.GREEN}✅ Configuration reset.{Colors.RESET}")
             else:
                 print("Reset cancelled.")
-                
+
         # --- View configuration ---
         elif choice == "5":
             print(f"\n{Colors.CYAN}--- Current Configuration ---{Colors.RESET}")
@@ -164,7 +168,10 @@ async def run_config_editor(config):
                 if admins:
                     print(f"\n{Colors.YELLOW}Admins:{Colors.RESET}")
                     for i, (phone, creds) in enumerate(admins.items(), start=1):
-                        print(f"{i}. {phone} → ID:{creds['api_id']}, HASH:{creds['api_hash'][:6]}****")
+                        print(
+                            f"{i}. {phone} → ID:{creds['api_id']}, "
+                            f"HASH:{creds['api_hash'][:6]}****"
+                        )
                 else:
                     print("No admins configured.")
 
