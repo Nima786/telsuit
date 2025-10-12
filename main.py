@@ -8,7 +8,6 @@ A unified toolkit for managing Telegram channels:
 • Designed for automation and stability
 """
 
-import os
 import sys
 import asyncio
 import logging
