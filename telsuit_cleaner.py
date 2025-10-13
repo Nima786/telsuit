@@ -42,10 +42,23 @@ _ensure_rotating_logs()
 # ============================================================
 
 async def _delete_messages(client, chat_id, msg_ids, batch=50):
-    """Delete messages in small batches for safety."""
+    """
+    Delete messages in small batches — now also detects and removes
+    entire media groups (albums) by grouped_id.
+    """
     deleted = 0
+    all_to_delete = set(msg_ids)
+
+    # Collect all grouped media siblings
+    async for msg in client.iter_messages(chat_id, ids=msg_ids):
+        if getattr(msg, "grouped_id", None):
+            async for sibling in client.iter_messages(chat_id, reverse=True, limit=50):
+                if getattr(sibling, "grouped_id", None) == msg.grouped_id:
+                    all_to_delete.add(sibling.id)
+
+    all_to_delete = sorted(all_to_delete)
     buffer = []
-    for mid in msg_ids:
+    for mid in all_to_delete:
         buffer.append(mid)
         if len(buffer) >= batch:
             await client.delete_messages(chat_id, buffer)
