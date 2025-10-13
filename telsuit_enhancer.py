@@ -82,8 +82,7 @@ async def start_enhancer(auto=False):
             logger.info(f"✅ Enhanced message {event.message.id} in {event.chat.username}")
         except Exception as e:
             logger.error(f"❌ Failed editing message {event.message.id}: {e}")
-                
-    finally:
+        finally:
             try:
                 # ✅ Trigger Cleaner only for real NEW posts
                 msg = event.message
