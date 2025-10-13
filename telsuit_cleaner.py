@@ -358,7 +358,7 @@ async def _menu_forward_copy(client, config):
     msgs = []
     async for m in client.iter_messages(src, limit=start_from + count):
         msgs.append(m)
-    msgs = msgs[start_from : start_from + count]
+    msgs = msgs[start_from: start_from + count]
     if reverse:
         msgs.reverse()
 
