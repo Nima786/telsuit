@@ -86,6 +86,7 @@ finally:
     # ✅ Always trigger Cleaner for NEW posts only
     if isinstance(event, events.NewMessage.Event):
         try:
+            from telsuit_cleaner import run_duplicate_check_for_event
             await run_duplicate_check_for_event(client, config, event)
             logger.info(
                 f"🧹 Cleaner triggered after new message {event.message.id} "
