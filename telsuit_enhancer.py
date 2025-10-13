@@ -83,8 +83,8 @@ async def start_enhancer(auto=False):
         except Exception as e:
             logger.error(f"❌ Failed editing message {event.message.id}: {e}")
         finally:
-            # ✅ Trigger Cleaner only for new posts (not edits)
-            if getattr(event, "name", "").lower() == "newmessage":
+            # ✅ Trigger Cleaner only for NEW posts (not edits)
+            if isinstance(event, events.NewMessage.Event):
                 try:
                     await run_duplicate_check_for_event(client, config, event)
                     logger.info(
@@ -95,6 +95,7 @@ async def start_enhancer(auto=False):
                     logger.error(f"Cleaner trigger failed: {clean_err}")
             else:
                 logger.debug(f"✏️ Edit detected (no cleaner trigger): {event.message.id}")
+
 
     # --- Register handlers ---
     for ch in config["channels"]:
