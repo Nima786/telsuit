@@ -78,17 +78,21 @@ async def start_enhancer(auto=False):
         final_entities.sort(key=lambda e: e.offset)
 
         try:
-            await event.edit(parsed_text, formatting_entities=final_entities)
-            logger.info(
-                f"✅ Enhanced message {event.message.id} in {event.chat.username}"
-            )
-
-            # 🔁 Automatically trigger Cleaner duplicate check
+    await event.edit(parsed_text, formatting_entities=final_entities)
+    logger.info(f"✅ Enhanced message {event.message.id} in {event.chat.username}")
+except Exception as e:
+    logger.error(f"❌ Failed editing message {event.message.id}: {e}")
+finally:
+    # ✅ Always trigger Cleaner for NEW posts only
+    if isinstance(event, events.NewMessage.Event):
+        try:
             await run_duplicate_check_for_event(client, config, event)
-            logger.info("🧹 Cleaner check triggered after enhancement.")
-
-        except Exception as e:
-            logger.error(f"❌ Failed editing message {event.message.id}: {e}")
+            logger.info(
+                f"🧹 Cleaner triggered after new message {event.message.id} "
+                f"in {event.chat.username}"
+            )
+        except Exception as clean_err:
+            logger.error(f"Cleaner trigger failed: {clean_err}")
 
     # --- Register handlers ---
     for ch in config["channels"]:
