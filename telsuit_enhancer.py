@@ -125,3 +125,14 @@ async def start_enhancer(auto=False):
 async def run_enhancer(auto=False):
     """Wrapper for async run (used by main.py)."""
     await start_enhancer(auto=auto)
+
+# --- ▶️ CLI Entrypoint ---
+if __name__ == "__main__":
+    import sys
+    import asyncio
+
+    auto_mode = "--headless" in sys.argv
+    try:
+        asyncio.run(start_enhancer(auto=auto_mode))
+    except KeyboardInterrupt:
+        print("🛑 TelSuit stopped by user.")
