@@ -82,20 +82,32 @@ async def start_enhancer(auto=False):
             logger.info(f"✅ Enhanced message {event.message.id} in {event.chat.username}")
         except Exception as e:
             logger.error(f"❌ Failed editing message {event.message.id}: {e}")
-        finally:
+                
+    finally:
             try:
-                # ✅ Trigger Cleaner only for NEW messages (not edits)
-                if getattr(event, "is_channel", False) and isinstance(event, events.NewMessage.Event):
-                    await run_duplicate_check_for_event(client, config, event)
-                    logger.info(
-                        f"🧹 Cleaner triggered after NEW message {event.message.id} "
-                        f"in {event.chat.username}"
-                    )
-                else:
+                # ✅ Trigger Cleaner only for real NEW posts
+                msg = event.message
+
+                # Skip if message has edit_date (means it's an edited post)
+                if getattr(msg, "edit_date", None):
                     logger.debug(
-                        f"✏️ Edit or non-channel message — cleaner not triggered "
-                        f"({event.message.id})"
+                        f"✏️ Edit detected for message {msg.id} — cleaner not triggered"
                     )
+                    return
+
+                # Skip if not from a channel
+                if not getattr(event, "is_channel", False):
+                    logger.debug(
+                        f"💬 Non-channel message ({msg.id}) — cleaner not triggered"
+                    )
+                    return
+
+                # Run cleaner only for true new messages
+                await run_duplicate_check_for_event(client, config, event)
+                logger.info(
+                    f"🧹 Cleaner triggered after NEW message {msg.id} in {event.chat.username}"
+                )
+
             except Exception as clean_err:
                 logger.error(f"Cleaner trigger failed: {clean_err}")
 
