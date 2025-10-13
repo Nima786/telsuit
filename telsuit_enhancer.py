@@ -84,8 +84,8 @@ async def start_enhancer(auto=False):
             logger.error(f"❌ Failed editing message {event.message.id}: {e}")
         finally:
             try:
-                # ✅ Run Cleaner only for NEW messages (not edits)
-                if hasattr(event, "original_update") and event.original_update.__class__.__name__ == "UpdateNewMessage":
+                # ✅ Trigger Cleaner only for NEW messages (not edits)
+                if getattr(event, "is_channel", False) and isinstance(event, events.NewMessage.Event):
                     await run_duplicate_check_for_event(client, config, event)
                     logger.info(
                         f"🧹 Cleaner triggered after NEW message {event.message.id} "
@@ -93,7 +93,7 @@ async def start_enhancer(auto=False):
                     )
                 else:
                     logger.debug(
-                        f"✏️ Edit detected or non-new event — cleaner not triggered "
+                        f"✏️ Edit or non-channel message — cleaner not triggered "
                         f"({event.message.id})"
                     )
             except Exception as clean_err:
