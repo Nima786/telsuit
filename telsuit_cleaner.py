@@ -19,6 +19,7 @@ from telsuit_core import (
 # Logging setup
 # ============================================================
 
+
 def _ensure_rotating_logs() -> None:
     """Prevent log files from growing indefinitely."""
     for h in list(logger.handlers):
