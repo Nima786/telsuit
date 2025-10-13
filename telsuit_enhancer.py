@@ -95,7 +95,7 @@ async def start_enhancer(auto=False):
                     logger.error(f"Cleaner trigger failed: {clean_err}")
             else:
                 logger.debug(f"✏️ Edit detected (no cleaner trigger): {event.message.id}")
-             
+
     # --- Register handlers ---
     for ch in config["channels"]:
         client.add_event_handler(handle_message, events.NewMessage(chats=ch))
