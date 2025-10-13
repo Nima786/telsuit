@@ -3,7 +3,7 @@ import asyncio
 import re
 import os
 from logging.handlers import RotatingFileHandler
-from telethon import TelegramClient, events
+from telethon import TelegramClient
 from telethon.tl.types import Message
 from telsuit_core import (
     get_config,
