@@ -1,11 +1,12 @@
 import re
+import asyncio
+from asyncio import Queue
 from telethon import TelegramClient, events
 from telethon.tl.types import MessageEntityCustomEmoji
 from telsuit_core import get_config, logger
 from telsuit_cleaner import run_duplicate_check_for_event
 
-
-# --- 🎨 Emoji Enhancer Logic ---
+# --- 🎨 Emoji Enhancer Logic with Sequential Queue ---
 async def start_enhancer(auto=False):
     """Main entry point for emoji enhancement."""
     config = get_config()
@@ -39,22 +40,26 @@ async def start_enhancer(auto=False):
 
     client = TelegramClient(f"enhancer_{phone}.session", int(api_id), api_hash)
 
-    # --- Event Handler ---
-    async def handle_message(event):
-        """Enhance emojis in new or edited messages."""
+    # --- Shared async queue to serialize message processing ---
+    message_queue = Queue()
+    processing = False
+
+    # --- Actual emoji enhancement logic ---
+    async def process_single_message(event):
+        """Enhance emojis and trigger cleaner when done."""
         text = event.message.text
         if not text:
             return
 
         try:
-            parsed_text, parsed_entities = await client._parse_message_text(text, 'md')
+            parsed_text, parsed_entities = await client._parse_message_text(text, "md")
         except TypeError:
             parsed_text, parsed_entities = await client._parse_message_text(
-                text=text, parse_mode='md'
+                text=text, parse_mode="md"
             )
 
         matches = []
-        for emoji, doc_id in config['emoji_map'].items():
+        for emoji, doc_id in config["emoji_map"].items():
             for m in re.finditer(re.escape(emoji), parsed_text):
                 matches.append((m.start(), m.end(), emoji, int(doc_id)))
 
@@ -63,11 +68,10 @@ async def start_enhancer(auto=False):
 
         matches.sort(key=lambda x: x[0])
         new_entities = []
-
         for start, end, emoji, doc_id in matches:
             prefix = parsed_text[:start]
-            offset = len(prefix.encode('utf-16-le')) // 2
-            length = len(emoji.encode('utf-16-le')) // 2
+            offset = len(prefix.encode("utf-16-le")) // 2
+            length = len(emoji.encode("utf-16-le")) // 2
             new_entities.append(
                 MessageEntityCustomEmoji(
                     offset=offset, length=length, document_id=doc_id
@@ -77,45 +81,67 @@ async def start_enhancer(auto=False):
         final_entities = (parsed_entities or []) + new_entities
         final_entities.sort(key=lambda e: e.offset)
 
+        msg = event.message
+
         try:
             await event.edit(parsed_text, formatting_entities=final_entities)
-            logger.info(f"✅ Enhanced message {event.message.id} in {event.chat.username}")
+            logger.info(f"✅ Enhanced message {msg.id} in {event.chat.username}")
         except Exception as e:
-            logger.error(f"❌ Failed editing message {event.message.id}: {e}")
+            logger.error(f"❌ Failed editing message {msg.id}: {e}")
         finally:
             try:
-                # ✅ Trigger Cleaner only for real NEW posts
-                msg = event.message
-
-                # Skip if message has edit_date (means it's an edited post)
+                # ✅ Only trigger cleaner for NEW messages (not edits)
                 if getattr(msg, "edit_date", None):
                     logger.debug(
                         f"✏️ Edit detected for message {msg.id} — cleaner not triggered"
                     )
                     return
 
-                # Skip if not from a channel
                 if not getattr(event, "is_channel", False):
                     logger.debug(
                         f"💬 Non-channel message ({msg.id}) — cleaner not triggered"
                     )
                     return
 
-                # Run cleaner only for true new messages
                 await run_duplicate_check_for_event(client, config, event)
                 logger.info(
                     f"🧹 Cleaner triggered after NEW message {msg.id} in {event.chat.username}"
                 )
-
             except Exception as clean_err:
                 logger.error(f"Cleaner trigger failed: {clean_err}")
 
-    # --- Register handlers ---
+    # --- Event Handler: queue incoming messages ---
+    async def handle_message(event):
+        """Push each new message or edit into queue to process sequentially."""
+        await message_queue.put(event)
+
+    # --- Queue worker to process messages one-by-one ---
+    async def process_queue():
+        nonlocal processing
+        if processing:
+            return
+        processing = True
+
+        while True:
+            event = await message_queue.get()
+            try:
+                await process_single_message(event)
+            except Exception as e:
+                logger.error(f"Queue error: {e}")
+            finally:
+                message_queue.task_done()
+                await asyncio.sleep(2)  # Delay between processing messages
+
+    # --- Register event handlers ---
     for ch in config["channels"]:
         client.add_event_handler(handle_message, events.NewMessage(chats=ch))
         client.add_event_handler(handle_message, events.MessageEdited(chats=ch))
         logger.info(f"Monitoring channel: {ch}")
 
+    # Start queue worker
+    client.loop.create_task(process_queue())
+
+    # Start client
     await client.start(phone=phone)
     logger.info(f"Client started under admin {phone}")
     await client.run_until_disconnected()
@@ -126,7 +152,7 @@ async def run_enhancer(auto=False):
     """Wrapper for async run (used by main.py)."""
     await start_enhancer(auto=auto)
 
-# --- ▶️ CLI Entrypoint ---
+
 if __name__ == "__main__":
     import sys
     import asyncio
