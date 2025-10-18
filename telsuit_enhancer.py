@@ -6,6 +6,7 @@ from telethon.tl.types import MessageEntityCustomEmoji
 from telsuit_core import get_config, logger
 from telsuit_cleaner import run_duplicate_check_for_event
 
+
 # --- 🎨 Emoji Enhancer Logic with Sequential Queue ---
 async def start_enhancer(auto=False):
     """Main entry point for emoji enhancement."""
@@ -155,10 +156,11 @@ async def run_enhancer(auto=False):
 
 if __name__ == "__main__":
     import sys
-    import asyncio
-
+    # 'asyncio' is already imported at the top, removing the redundant import here fixes F811
+    
     auto_mode = "--headless" in sys.argv
     try:
+        # The 'asyncio' module is available from the top-level import
         asyncio.run(start_enhancer(auto=auto_mode))
     except KeyboardInterrupt:
         print("🛑 TelSuit stopped by user.")
