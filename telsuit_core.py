@@ -19,7 +19,6 @@ CONFIG_FILE = 'telsuit-config.json'
 
 def get_config():
     """Load configuration from disk."""
-    cfg.setdefault("queue_delay", 3)
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE, 'r') as f:
             try:
@@ -30,6 +29,7 @@ def get_config():
         cfg = {}
 
     # Default schema (auto-fill missing keys)
+    cfg.setdefault("queue_delay", 3)
     cfg.setdefault("admins", {})
     cfg.setdefault("channels", [])
     cfg.setdefault("emoji_map", {})
