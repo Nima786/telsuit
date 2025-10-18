@@ -10,6 +10,7 @@ from telsuit_cleaner import run_duplicate_check_for_event
 async def start_enhancer(auto=False):
     """Main entry point for emoji enhancement."""
 
+
     config = get_config()
 
     if not config["admins"]:
