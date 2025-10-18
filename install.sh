@@ -191,7 +191,7 @@ After=network.target
 Type=simple
 User=root
 WorkingDirectory=/root/telsuit
-ExecStart=/root/telsuit/venv/bin/python3 /root/telsuit/main.py --headless
+ExecStart=/root/telsuit/venv/bin/python3 /root/telsuit/telsuit_enhancer.py --headless
 Restart=always
 RestartSec=5
 Environment="PYTHONUNBUFFERED=1"
