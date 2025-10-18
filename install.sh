@@ -189,14 +189,18 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=$INSTALL_DIR
-ExecStart=$VENV_DIR/bin/python3 $INSTALL_DIR/main.py --headless
+User=root
+WorkingDirectory=/root/telsuit
+ExecStart=/root/telsuit/venv/bin/python3 /root/telsuit/main.py --headless
 Restart=always
 RestartSec=5
-User=root
+Environment="PYTHONUNBUFFERED=1"
+StandardOutput=append:/root/telsuit/telsuit.log
+StandardError=append:/root/telsuit/telsuit.log
 
 [Install]
 WantedBy=multi-user.target
+
 EOF
 
 sudo systemctl daemon-reload
