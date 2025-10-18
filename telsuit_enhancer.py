@@ -157,7 +157,7 @@ async def run_enhancer(auto=False):
 if __name__ == "__main__":
     import sys
     # 'asyncio' is already imported at the top, removing the redundant import here fixes F811
-    
+
     auto_mode = "--headless" in sys.argv
     try:
         # The 'asyncio' module is available from the top-level import
