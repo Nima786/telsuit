@@ -47,11 +47,12 @@ async def start_enhancer(auto=False):
     message_queue = Queue()
     processing = False
 
-    # --- Actual emoji enhancement logic ---
+    # --- Actual emoji enhancement logic (REVISED) ---
     async def process_single_message(event):
         """Enhance emojis, add button, and trigger cleaner when done."""
-        msg = event.message
-        text = msg.text or msg.message
+        # Use event.message to get the original message object for comparison
+        original_msg = event.message
+        text = original_msg.text or original_msg.message
         if not text:
             return
 
@@ -87,71 +88,81 @@ async def start_enhancer(auto=False):
             final_entities.sort(key=lambda e: e.offset)
             entities_to_use = final_entities
         else:
-            # No emoji changes, use existing entities if they exist
-            entities_to_use = getattr(msg, 'entities', None)
+            entities_to_use = getattr(original_msg, 'entities', None)
         
         # 2. Check for button logic
-        buttons_for_edit = None
+        buttons_for_send = None
         button_update_needed = False
         product_id = None
-
+        
         # Check if it's a product post AND it currently has NO inline buttons
-        if "شناسه محصول" in parsed_text and not getattr(msg, "reply_markup", None):
+        if "شناسه محصول" in parsed_text and not getattr(original_msg, "reply_markup", None):
             match = re.search(r"شناسه\s*محصول[:：]?\s*(\d+)", parsed_text)
             if match:
                 product_id = match.group(1)
                 order_url = f"https://t.me/homplast_salebot?start=product_{product_id}"
-                buttons_for_edit = [[Button.url("🛒 Order", order_url)]]
+                buttons_for_send = [[Button.url("🛒 Order", order_url)]]
                 button_update_needed = True
 
-        # 3. Perform atomic edit if *any* update is needed
+        # 3. Perform Update Logic (Edit OR Delete/Send)
         if not emoji_update_needed and not button_update_needed:
-            return # No edit needed, exit early
-            
-        # Dynamically build arguments for event.edit()
-        edit_kwargs = {
-            'text': parsed_text,
-            'formatting_entities': entities_to_use
-        }
-        
-        # FIX: Only add 'buttons' to arguments if we explicitly want to change them
-        if button_update_needed:
-            edit_kwargs['buttons'] = buttons_for_edit
+            return # No action needed
 
+        # Prepare to use the new message object for the cleaner call
+        current_msg = original_msg 
 
         try:
-            # Execute the single edit for both emojis and buttons
-            await event.edit(**edit_kwargs)
-            
-            # 4. Log successful actions (moved inside try block)
-            if emoji_update_needed:
-                logger.info(f"✅ Enhanced message {msg.id} in {event.chat.username}")
+            # === FIX: Use Delete and Send if a button is required ===
             if button_update_needed:
-                logger.info(f"🛒 Added Order button to message {msg.id} (Product ID: {product_id})")
+                # 3a. Delete the original message
+                await client.delete_messages(original_msg.peer_id, [original_msg.id])
+                logger.debug(f"🗑️ Deleted original message {original_msg.id} for button insertion.")
+                
+                # 3b. Send a new message with the formatted data
+                new_msg = await client.send_message(
+                    entity=original_msg.peer_id,
+                    message=parsed_text,
+                    formatting_entities=entities_to_use,
+                    buttons=buttons_for_send
+                )
+                
+                # Update current_msg object for cleaner
+                current_msg = new_msg
+                
+                # 4. Log successful actions (moved inside try block)
+                logger.info(f"✅ Enhanced and sent new message {current_msg.id} in {event.chat.username}")
+                logger.info(f"🛒 Added Order button to message {current_msg.id} (Product ID: {product_id})")
+
+            # === Fallback: Use standard Edit if ONLY emojis are required ===
+            elif emoji_update_needed:
+                edit_kwargs = {
+                    'text': parsed_text,
+                    'formatting_entities': entities_to_use
+                }
+                # Since we are only editing emojis, we let the original message buttons/reply_markup remain
+                await event.edit(**edit_kwargs)
+                logger.info(f"✅ Enhanced message {current_msg.id} in {event.chat.username}")
 
         except Exception as e:
-            # Log any edit failure
-            logger.error(f"❌ Failed editing message {msg.id}: {e}")
+            logger.error(f"❌ Failed processing message {original_msg.id}: {e}")
             
         finally:
             # 5. Run Cleaner 
             try:
-                # Only trigger cleaner for NEW messages (not edits)
-                if getattr(msg, "edit_date", None):
-                    logger.debug(
-                        f"✏️ Edit detected for message {msg.id} — cleaner not triggered"
-                    )
+                # Cleaner is only triggered for the initial NEW message, not for edits.
+                # We check the original event message state.
+                if not button_update_needed and getattr(original_msg, "edit_date", None):
+                    logger.debug(f"✏️ Edit detected for message {original_msg.id} — cleaner not triggered")
                     return
-
+                
                 if not getattr(event, "is_channel", False):
-                    logger.debug(
-                        f"💬 Non-channel message ({msg.id}) — cleaner not triggered"
-                    )
+                    logger.debug(f"💬 Non-channel message ({current_msg.id}) — cleaner not triggered")
                     return
 
+                # Run cleaner on the event, which will use the current_msg's details
                 await run_duplicate_check_for_event(client, config, event)
                 logger.info(
-                    f"🧹 Cleaner triggered after NEW message {msg.id} in {event.chat.username}"
+                    f"🧹 Cleaner triggered after NEW message {current_msg.id} in {event.chat.username}"
                 )
             except Exception as clean_err:
                 logger.error(f"Cleaner trigger failed: {clean_err}")
