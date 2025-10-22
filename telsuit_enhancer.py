@@ -3,11 +3,49 @@ import asyncio
 from asyncio import Queue
 from telethon import TelegramClient, events
 from telethon.tl.types import MessageEntityCustomEmoji
+from telethon.tl.custom import Button  # ✅ NEW import
 from telsuit_core import get_config, logger
 from telsuit_cleaner import run_duplicate_check_for_event
 
 
 # --- 🎨 Emoji Enhancer Logic with Sequential Queue ---
+
+# ✅ NEW HELPER FUNCTION
+async def add_order_button_if_product(client, event):
+    """Adds '🛒 Order' button if post contains product code (شناسه محصول)."""
+    msg = event.message
+    text = msg.text or msg.message or ""
+    if not text:
+        return
+
+    # ✅ Skip if post already has a button
+    if getattr(msg, "reply_markup", None):
+        return
+
+    # ✅ Check if this is a product post
+    if "شناسه محصول" not in text:
+        return
+
+    # ✅ Extract product ID (you can refine the regex later)
+    match = re.search(r"شناسه\s*محصول[:：]?\s*(\d+)", text)
+    if not match:
+        return
+
+    product_id = match.group(1)
+    order_url = f"https://t.me/homplast_salebot?start=product_{product_id}"
+
+    try:
+        await client.edit_message(
+            entity=msg.peer_id,
+            message=msg.id,
+            text=text,
+            buttons=[[Button.url("🛒 Order", order_url)]],
+        )
+        logger.info(f"🛒 Added Order button to message {msg.id} (Product ID: {product_id})")
+    except Exception as e:
+        logger.error(f"⚠️ Failed to add Order button to message {msg.id}: {e}")
+
+
 async def start_enhancer(auto=False):
     """Main entry point for emoji enhancement."""
     config = get_config()
@@ -91,6 +129,9 @@ async def start_enhancer(auto=False):
             logger.error(f"❌ Failed editing message {msg.id}: {e}")
         finally:
             try:
+                # ✅ NEW CALL: Add order button if it's a product post
+                await add_order_button_if_product(client, event)
+
                 # ✅ Only trigger cleaner for NEW messages (not edits)
                 if getattr(msg, "edit_date", None):
                     logger.debug(
@@ -156,11 +197,9 @@ async def run_enhancer(auto=False):
 
 if __name__ == "__main__":
     import sys
-    # 'asyncio' is already imported at the top, removing the redundant import here fixes F811
 
     auto_mode = "--headless" in sys.argv
     try:
-        # The 'asyncio' module is available from the top-level import
         asyncio.run(start_enhancer(auto=auto_mode))
     except KeyboardInterrupt:
         print("🛑 TelSuit stopped by user.")
