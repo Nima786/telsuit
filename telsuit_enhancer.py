@@ -14,6 +14,7 @@ from telsuit_cleaner import run_duplicate_check_for_event
 async def add_order_button_if_product(client, event):
     """Adds '🛒 Order' button if post contains product code (شناسه محصول)."""
     msg = event.message
+    logger.info(f"DEBUG text for msg {msg.id}: {repr(msg.text)} | {repr(msg.message)}")
     text = msg.text or msg.message or ""
     if not text:
         return
