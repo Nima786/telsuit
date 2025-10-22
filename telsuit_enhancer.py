@@ -3,8 +3,8 @@ import asyncio
 from asyncio import Queue
 from telethon import TelegramClient, events
 from telethon.tl.types import MessageEntityCustomEmoji
-# Import Button for inline keyboards
-from telethon.tl.custom import Button 
+from telethon.tl.custom import Button
+from telethon.errors.rpcerrorlist import MessageNotModifiedError # Import the specific error
 from telsuit_core import get_config, logger
 from telsuit_cleaner import run_duplicate_check_for_event
 
@@ -92,7 +92,7 @@ async def start_enhancer(auto=False):
             entities_to_use = getattr(msg, 'entities', None)
 
 
-        # 2. Check for button logic (NEW LOGIC)
+        # 2. Check for button logic 
         buttons_for_edit = None
         button_update_needed = False
         product_id = None
@@ -130,8 +130,12 @@ async def start_enhancer(auto=False):
             if button_update_needed:
                 logger.info(f"🛒 Added Order button to message {msg.id} (Product ID: {product_id})")
                 
+        except MessageNotModifiedError:
+            # FIX: Gracefully handle the "Content not modified" error, 
+            # as it technically means the message is in the desired state.
+            logger.debug(f"ℹ️ Message {msg.id} already has the desired content/button; no action taken.")
         except Exception as e:
-            logger.error(f"❌ Failed editing message {msg.id}: {e}")
+            logger.error(f"❌ Failed editing message {msg.id}: {e} (caused by {type(e).__name__})")
             
         finally:
             try:
