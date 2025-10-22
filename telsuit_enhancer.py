@@ -49,11 +49,13 @@ async def start_enhancer(auto=False):
 
     # --- Actual emoji enhancement logic ---
     async def process_single_message(event):
-        """Enhance emojis, add button, and trigger cleaner when done."""
-        msg = event.message
-        text = msg.text or msg.message
-        if not text:
-            return
+            """Enhance emojis, add button, and trigger cleaner when done."""
+            msg = event.message
+            
+            # FIX: Check msg.text OR msg.message OR msg.raw_text
+            text = msg.text or msg.message or msg.raw_text
+            if not text:
+                return
 
         # 1. Parse text for emojis
         try:
