@@ -3,13 +3,13 @@ import asyncio
 from asyncio import Queue
 from telethon import TelegramClient, events
 from telethon.tl.types import MessageEntityCustomEmoji
-from telethon.tl.custom import Button
+# Import Button for inline keyboards
+from telethon.tl.custom import Button 
 from telsuit_core import get_config, logger
 from telsuit_cleaner import run_duplicate_check_for_event
 
 
 # --- 🎨 Emoji Enhancer Logic with Sequential Queue ---
-
 async def start_enhancer(auto=False):
     """Main entry point for emoji enhancement."""
     config = get_config()
@@ -47,16 +47,15 @@ async def start_enhancer(auto=False):
     message_queue = Queue()
     processing = False
 
-    # --- Actual emoji enhancement logic (REVISED) ---
+    # --- Actual emoji enhancement logic ---
     async def process_single_message(event):
         """Enhance emojis, add button, and trigger cleaner when done."""
-        # Use event.message to get the original message object for comparison
-        original_msg = event.message
-        text = original_msg.text or original_msg.message
+        msg = event.message
+        text = msg.text or msg.message
         if not text:
             return
 
-        # 1. Parse text and find custom emojis
+        # 1. Parse text for emojis
         try:
             parsed_text, parsed_entities = await client._parse_message_text(text, "md")
         except TypeError:
@@ -71,6 +70,7 @@ async def start_enhancer(auto=False):
 
         emoji_update_needed = bool(matches)
         
+        # Calculate final entities if update is needed
         if emoji_update_needed:
             matches.sort(key=lambda x: x[0])
             new_entities = []
@@ -88,81 +88,69 @@ async def start_enhancer(auto=False):
             final_entities.sort(key=lambda e: e.offset)
             entities_to_use = final_entities
         else:
-            entities_to_use = getattr(original_msg, 'entities', None)
-        
-        # 2. Check for button logic
-        buttons_for_send = None
+            # If no emoji update, use existing entities
+            entities_to_use = getattr(msg, 'entities', None)
+
+
+        # 2. Check for button logic (NEW LOGIC)
+        buttons_for_edit = None
         button_update_needed = False
         product_id = None
-        
+
         # Check if it's a product post AND it currently has NO inline buttons
-        if "شناسه محصول" in parsed_text and not getattr(original_msg, "reply_markup", None):
+        if "شناسه محصول" in parsed_text and not getattr(msg, "reply_markup", None):
             match = re.search(r"شناسه\s*محصول[:：]?\s*(\d+)", parsed_text)
             if match:
                 product_id = match.group(1)
                 order_url = f"https://t.me/homplast_salebot?start=product_{product_id}"
-                buttons_for_send = [[Button.url("🛒 Order", order_url)]]
+                buttons_for_edit = [[Button.url("🛒 Order", order_url)]]
                 button_update_needed = True
 
-        # 3. Perform Update Logic (Edit OR Delete/Send)
+        # If neither emojis nor button needs changing, exit
         if not emoji_update_needed and not button_update_needed:
-            return # No action needed
+            return
 
-        # Prepare to use the new message object for the cleaner call
-        current_msg = original_msg 
-
+        # 3. Perform atomic edit
+        edit_kwargs = {
+            'text': parsed_text,
+            'formatting_entities': entities_to_use
+        }
+        
+        # Only include the buttons argument if we are adding them
+        if button_update_needed:
+            edit_kwargs['buttons'] = buttons_for_edit
+        
         try:
-            # === FIX: Use Delete and Send if a button is required ===
+            # Use event.edit with both changes simultaneously
+            await event.edit(**edit_kwargs)
+            
+            # Log successful actions
+            if emoji_update_needed:
+                logger.info(f"✅ Enhanced message {msg.id} in {event.chat.username}")
             if button_update_needed:
-                # 3a. Delete the original message
-                await client.delete_messages(original_msg.peer_id, [original_msg.id])
-                logger.debug(f"🗑️ Deleted original message {original_msg.id} for button insertion.")
+                logger.info(f"🛒 Added Order button to message {msg.id} (Product ID: {product_id})")
                 
-                # 3b. Send a new message with the formatted data
-                new_msg = await client.send_message(
-                    entity=original_msg.peer_id,
-                    message=parsed_text,
-                    formatting_entities=entities_to_use,
-                    buttons=buttons_for_send
-                )
-                
-                # Update current_msg object for cleaner
-                current_msg = new_msg
-                
-                # 4. Log successful actions (moved inside try block)
-                logger.info(f"✅ Enhanced and sent new message {current_msg.id} in {event.chat.username}")
-                logger.info(f"🛒 Added Order button to message {current_msg.id} (Product ID: {product_id})")
-
-            # === Fallback: Use standard Edit if ONLY emojis are required ===
-            elif emoji_update_needed:
-                edit_kwargs = {
-                    'text': parsed_text,
-                    'formatting_entities': entities_to_use
-                }
-                # Since we are only editing emojis, we let the original message buttons/reply_markup remain
-                await event.edit(**edit_kwargs)
-                logger.info(f"✅ Enhanced message {current_msg.id} in {event.chat.username}")
-
         except Exception as e:
-            logger.error(f"❌ Failed processing message {original_msg.id}: {e}")
+            logger.error(f"❌ Failed editing message {msg.id}: {e}")
             
         finally:
-            # 5. Run Cleaner 
             try:
-                # Cleaner is only triggered for the initial NEW message, not for edits.
-                # We check the original event message state.
-                if not button_update_needed and getattr(original_msg, "edit_date", None):
-                    logger.debug(f"✏️ Edit detected for message {original_msg.id} — cleaner not triggered")
-                    return
-                
-                if not getattr(event, "is_channel", False):
-                    logger.debug(f"💬 Non-channel message ({current_msg.id}) — cleaner not triggered")
+                # Cleaner logic (Unchanged from original requirements)
+                if getattr(msg, "edit_date", None):
+                    logger.debug(
+                        f"✏️ Edit detected for message {msg.id} — cleaner not triggered"
+                    )
                     return
 
-                # Run cleaner on the event, which will use the current_msg's details
+                if not getattr(event, "is_channel", False):
+                    logger.debug(
+                        f"💬 Non-channel message ({msg.id}) — cleaner not triggered"
+                    )
+                    return
+
                 await run_duplicate_check_for_event(client, config, event)
                 logger.info(
-                    f"🧹 Cleaner triggered after NEW message {current_msg.id} in {event.chat.username}"
+                    f"🧹 Cleaner triggered after NEW message {msg.id} in {event.chat.username}"
                 )
             except Exception as clean_err:
                 logger.error(f"Cleaner trigger failed: {clean_err}")
@@ -187,7 +175,7 @@ async def start_enhancer(auto=False):
                 logger.error(f"Queue error: {e}")
             finally:
                 message_queue.task_done()
-                await asyncio.sleep(2) # Delay between processing messages
+                await asyncio.sleep(2)  # Delay between processing messages
 
     # --- Register event handlers ---
     for ch in config["channels"]:
