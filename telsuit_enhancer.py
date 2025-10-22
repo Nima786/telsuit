@@ -90,33 +90,38 @@ async def start_enhancer(auto=False):
             # No emoji changes, use existing entities if they exist
             entities_to_use = getattr(msg, 'entities', None)
         
-        # 2. Check for button logic (if needed)
-        # Default to existing buttons (or None)
-        buttons = getattr(msg, "reply_markup", None) 
+        # 2. Check for button logic
+        buttons_for_edit = None
         button_update_needed = False
         product_id = None
 
         # Check if it's a product post AND it currently has NO inline buttons
-        if "شناسه محصول" in parsed_text and not buttons:
+        if "شناسه محصول" in parsed_text and not getattr(msg, "reply_markup", None):
             match = re.search(r"شناسه\s*محصول[:：]?\s*(\d+)", parsed_text)
             if match:
                 product_id = match.group(1)
                 order_url = f"https://t.me/homplast_salebot?start=product_{product_id}"
-                buttons = [[Button.url("🛒 Order", order_url)]]
+                buttons_for_edit = [[Button.url("🛒 Order", order_url)]]
                 button_update_needed = True
-
 
         # 3. Perform atomic edit if *any* update is needed
         if not emoji_update_needed and not button_update_needed:
             return # No edit needed, exit early
+            
+        # Dynamically build arguments for event.edit()
+        edit_kwargs = {
+            'text': parsed_text,
+            'formatting_entities': entities_to_use
+        }
+        
+        # FIX: Only add 'buttons' to arguments if we explicitly want to change them
+        if button_update_needed:
+            edit_kwargs['buttons'] = buttons_for_edit
+
 
         try:
-            # FIX: Execute the single edit for both emojis and buttons
-            await event.edit(
-                parsed_text, 
-                formatting_entities=entities_to_use,
-                buttons=buttons
-            )
+            # Execute the single edit for both emojis and buttons
+            await event.edit(**edit_kwargs)
             
             # 4. Log successful actions (moved inside try block)
             if emoji_update_needed:
