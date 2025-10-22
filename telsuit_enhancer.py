@@ -39,7 +39,6 @@ async def add_order_button_if_product(client, event):
         await client.edit_message(
             entity=msg.peer_id,
             message=msg.id,
-            text=text,
             buttons=[[Button.url("🛒 Order", order_url)]],
         )
         logger.info(f"🛒 Added Order button to message {msg.id} (Product ID: {product_id})")
