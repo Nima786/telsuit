@@ -34,16 +34,20 @@ async def add_order_button_if_product(client, event):
     product_id = match.group(1)
     order_url = f"https://t.me/homplast_salebot?start=product_{product_id}"
 
-    try:
+        try:
+        # re-fetch full message object to get entities
+        full_msg = await client.get_messages(msg.peer_id, ids=msg.id)
+    
         await client.edit_message(
             entity=msg.peer_id,
             message=msg.id,
+            text=full_msg.text or full_msg.message or "",
+            formatting_entities=getattr(full_msg, "entities", None),
             buttons=[[Button.url("🛒 Order", order_url)]],
         )
         logger.info(f"🛒 Added Order button to message {msg.id} (Product ID: {product_id})")
     except Exception as e:
         logger.error(f"⚠️ Failed to add Order button to message {msg.id}: {e}")
-
 
 async def start_enhancer(auto=False):
     """Main entry point for emoji enhancement."""
