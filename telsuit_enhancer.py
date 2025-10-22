@@ -3,52 +3,15 @@ import asyncio
 from asyncio import Queue
 from telethon import TelegramClient, events
 from telethon.tl.types import MessageEntityCustomEmoji
-from telethon.tl.custom import Button # ✅ NEW import
+from telethon.tl.custom import Button
 from telsuit_core import get_config, logger
 from telsuit_cleaner import run_duplicate_check_for_event
 
 
 # --- 🎨 Emoji Enhancer Logic with Sequential Queue ---
 
-# ✅ NEW HELPER FUNCTION
-async def add_order_button_if_product(client, event):
-    """Adds '🛒 Order' button if post contains product code (شناسه محصول)."""
-    msg = event.message
-    text = msg.text or msg.message or ""
-    if not text:
-        return
-
-    # ✅ Skip if post already has a button
-    if getattr(msg, "reply_markup", None):
-        return
-
-    # ✅ Check if this is a product post
-    if "شناسه محصول" not in text:
-        return
-
-    # ✅ Extract product ID (you can refine the regex later)
-    match = re.search(r"شناسه\s*محصول[:：]?\s*(\d+)", text)
-    if not match:
-        return
-
-    product_id = match.group(1)
-    order_url = f"https://t.me/homplast_salebot?start=product_{product_id}"
-
-    # FIX: Corrected IndentationError here (Line 37 in the error log)
-    try:
-        # re-fetch full message object to get entities
-        full_msg = await client.get_messages(msg.peer_id, ids=msg.id)
-    
-        await client.edit_message(
-            entity=msg.peer_id,
-            message=msg.id,
-            text=full_msg.text or full_msg.message or "",
-            formatting_entities=getattr(full_msg, "entities", None),
-            buttons=[[Button.url("🛒 Order", order_url)]],
-        )
-        logger.info(f"🛒 Added Order button to message {msg.id} (Product ID: {product_id})")
-    except Exception as e:
-        logger.error(f"⚠️ Failed to add Order button to message {msg.id}: {e}")
+# NOTE: The add_order_button_if_product helper function has been removed.
+# Its logic is merged into process_single_message for an atomic edit.
 
 async def start_enhancer(auto=False):
     """Main entry point for emoji enhancement."""
@@ -89,11 +52,13 @@ async def start_enhancer(auto=False):
 
     # --- Actual emoji enhancement logic ---
     async def process_single_message(event):
-        """Enhance emojis and trigger cleaner when done."""
-        text = event.message.text
+        """Enhance emojis, add button, and trigger cleaner when done."""
+        msg = event.message
+        text = msg.text or msg.message
         if not text:
             return
 
+        # 1. Parse text and find custom emojis
         try:
             parsed_text, parsed_entities = await client._parse_message_text(text, "md")
         except TypeError:
@@ -106,36 +71,76 @@ async def start_enhancer(auto=False):
             for m in re.finditer(re.escape(emoji), parsed_text):
                 matches.append((m.start(), m.end(), emoji, int(doc_id)))
 
+        # If no custom emojis are found, proceed to button logic check
         if not matches:
-            return
-
-        matches.sort(key=lambda x: x[0])
-        new_entities = []
-        for start, end, emoji, doc_id in matches:
-            prefix = parsed_text[:start]
-            offset = len(prefix.encode("utf-16-le")) // 2
-            length = len(emoji.encode("utf-16-le")) // 2
-            new_entities.append(
-                MessageEntityCustomEmoji(
-                    offset=offset, length=length, document_id=doc_id
+            emoji_update_needed = False
+        else:
+            emoji_update_needed = True
+            matches.sort(key=lambda x: x[0])
+            new_entities = []
+            for start, end, emoji, doc_id in matches:
+                prefix = parsed_text[:start]
+                offset = len(prefix.encode("utf-16-le")) // 2
+                length = len(emoji.encode("utf-16-le")) // 2
+                new_entities.append(
+                    MessageEntityCustomEmoji(
+                        offset=offset, length=length, document_id=doc_id
+                    )
                 )
-            )
 
-        final_entities = (parsed_entities or []) + new_entities
-        final_entities.sort(key=lambda e: e.offset)
+            final_entities = (parsed_entities or []) + new_entities
+            final_entities.sort(key=lambda e: e.offset)
+        
+        # 2. Check for button logic
+        buttons = None
+        button_update_needed = False
+        
+        # Check if this is a product post AND it doesn't already have buttons
+        if "شناسه محصول" in parsed_text and not getattr(msg, "reply_markup", None):
+            # Extract product ID
+            match = re.search(r"شناسه\s*محصول[:：]?\s*(\d+)", parsed_text)
+            if match:
+                product_id = match.group(1)
+                order_url = f"https://t.me/homplast_salebot?start=product_{product_id}"
+                buttons = [[Button.url("🛒 Order", order_url)]]
+                button_update_needed = True
 
-        msg = event.message
+        # 3. Perform atomic edit if *any* update is needed
+        if not emoji_update_needed and not button_update_needed:
+            return # No edit needed, exit early
 
         try:
-            await event.edit(parsed_text, formatting_entities=final_entities)
-            logger.info(f"✅ Enhanced message {msg.id} in {event.chat.username}")
+            # Use parsed_entities/final_entities (with custom emojis) if they exist,
+            # otherwise use the original entities from the message object.
+            
+            # If emojis were modified, use final_entities. Otherwise, use existing.
+            if emoji_update_needed:
+                entities_to_use = final_entities
+            elif hasattr(msg, 'entities') and msg.entities:
+                # If only buttons are being added/changed, re-fetch original entities if needed.
+                # However, event.edit will usually handle retaining existing entities if we 
+                # don't pass them, but passing them is safer if we know they were good.
+                entities_to_use = msg.entities
+            else:
+                entities_to_use = None
+                
+            await event.edit(
+                parsed_text, 
+                formatting_entities=entities_to_use,
+                buttons=buttons
+            )
+            
+            if emoji_update_needed:
+                logger.info(f"✅ Enhanced message {msg.id} in {event.chat.username}")
+            if button_update_needed:
+                logger.info(f"🛒 Added Order button to message {msg.id} (Product ID: {product_id})")
+
         except Exception as e:
             logger.error(f"❌ Failed editing message {msg.id}: {e}")
+            
         finally:
+            # 4. Run Cleaner (same logic as before)
             try:
-                # ✅ NEW CALL: Add order button if it's a product post
-                await add_order_button_if_product(client, event)
-
                 # ✅ Only trigger cleaner for NEW messages (not edits)
                 if getattr(msg, "edit_date", None):
                     logger.debug(
