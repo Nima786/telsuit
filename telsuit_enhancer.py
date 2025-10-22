@@ -34,7 +34,7 @@ async def add_order_button_if_product(client, event):
     product_id = match.group(1)
     order_url = f"https://t.me/homplast_salebot?start=product_{product_id}"
 
-        try:
+     try:
         # re-fetch full message object to get entities
         full_msg = await client.get_messages(msg.peer_id, ids=msg.id)
     
