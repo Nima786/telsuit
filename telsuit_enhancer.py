@@ -1,8 +1,8 @@
 import re
 import asyncio
 from asyncio import Queue
-from telethon import TelegramClient, events, Button
-from telethon.tl.types import MessageEntityCustomEmoji
+from telethon import TelegramClient, events
+from telethon.tl.types import MessageEntityCustomEmoji, MessageEntityTextUrl
 from telsuit_core import get_config, logger
 from telsuit_cleaner import run_duplicate_check_for_event
 
@@ -47,7 +47,7 @@ async def start_enhancer(auto=False):
 
     # --- Actual emoji enhancement logic ---
     async def process_single_message(event):
-        """Enhance emojis, add Order button, and trigger cleaner when done."""
+        """Enhance emojis, add clickable order link, and trigger cleaner when done."""
         text = event.message.text
         if not text:
             return
@@ -72,14 +72,19 @@ async def start_enhancer(auto=False):
             if isinstance(e, MessageEntityCustomEmoji)
         ]
 
-        # Check if message already has buttons
-        has_buttons = msg.reply_markup is not None
+        # Check if "Order" link already exists in the text
+        has_order_link = "🛒 Order" in parsed_text or "Order" in parsed_text
+
+        needs_emoji_update = bool(matches) and not existing_custom_emojis
+        needs_order_link = not has_order_link
+
+        if not needs_emoji_update and not needs_order_link:
+            logger.debug(f"⏭️ Message {msg.id} already enhanced, skipping")
+            return
 
         # Build entities for custom emojis
         new_entities = []
-        needs_emoji_update = bool(matches) and not existing_custom_emojis
-        
-        if matches:
+        if matches and needs_emoji_update:
             matches.sort(key=lambda x: x[0])
             for start, end, emoji, doc_id in matches:
                 prefix = parsed_text[:start]
@@ -91,31 +96,35 @@ async def start_enhancer(auto=False):
                     )
                 )
 
+        # Add clickable "Order" link at the end (userbot-compatible method)
+        if needs_order_link:
+            # Add separator and order text
+            order_text = "\n\n🛒 Order"
+            new_text = parsed_text + order_text
+            
+            # Calculate offset for the order link
+            offset = len(parsed_text.encode("utf-16-le")) // 2 + 2  # +2 for \n\n
+            length = len("🛒 Order".encode("utf-16-le")) // 2
+            
+            # ⚠️ REPLACE THIS URL with your actual order link
+            order_url = "https://t.me/YourBotUsername"  
+            
+            # Create text URL entity (clickable link)
+            order_entity = MessageEntityTextUrl(
+                offset=offset,
+                length=length,
+                url=order_url
+            )
+            new_entities.append(order_entity)
+        else:
+            new_text = parsed_text
+
+        # Combine all entities
         final_entities = (parsed_entities or []) + new_entities
         final_entities.sort(key=lambda e: e.offset)
 
-        # Create inline "Order" button
-        # Replace URL with your actual order link or bot username
-        order_button = [[Button.url("🛒 Order", url="https://t.me/YourBotUsername")]]
-        
-        # Alternative: Use inline button with callback (requires bot to handle)
-        # order_button = [[Button.inline("🛒 Order", data=b"order_clicked")]]
-
-        # Determine if we need to edit the message
-        needs_button_update = not has_buttons
-        needs_update = needs_emoji_update or needs_button_update
-
-        if not needs_update:
-            logger.debug(f"⏭️ Message {msg.id} already enhanced, skipping")
-            return
-
         try:
-            # Edit with both emojis and button
-            await event.edit(
-                parsed_text, 
-                formatting_entities=final_entities if new_entities else None,
-                buttons=order_button
-            )
+            await event.edit(new_text, formatting_entities=final_entities)
             logger.info(f"✅ Enhanced message {msg.id} in {event.chat.username}")
         except Exception as e:
             logger.error(f"❌ Failed editing message {msg.id}: {e}")
