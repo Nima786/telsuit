@@ -49,13 +49,14 @@ async def start_enhancer(auto=False):
 
     # --- Actual emoji enhancement logic ---
     async def process_single_message(event):
-            """Enhance emojis, add button, and trigger cleaner when done."""
-            msg = event.message
-            
-            # FIX: Check msg.text OR msg.message OR msg.raw_text
-            text = msg.text or msg.message or msg.raw_text
-            if not text:
-                return
+        """Enhance emojis, add button, and trigger cleaner when done."""
+        msg = event.message
+        
+        # FIX: Removed incorrect indentation from here onwards
+        # Robust text retrieval
+        text = msg.text or msg.message or getattr(msg, 'raw_text', None)
+        if not text:
+            return
 
         # 1. Parse text for emojis
         try:
@@ -133,8 +134,8 @@ async def start_enhancer(auto=False):
                 logger.info(f"🛒 Added Order button to message {msg.id} (Product ID: {product_id})")
                 
         except MessageNotModifiedError:
-            # FIX: Gracefully handle the "Content not modified" error, 
-            # as it technically means the message is in the desired state.
+            # Gracefully handle the "Content not modified" error, 
+            # as it means the message is in the desired state.
             logger.debug(f"ℹ️ Message {msg.id} already has the desired content/button; no action taken.")
         except Exception as e:
             logger.error(f"❌ Failed editing message {msg.id}: {e} (caused by {type(e).__name__})")
