@@ -2,7 +2,7 @@ import re
 import asyncio
 from asyncio import Queue
 from telethon import TelegramClient, events
-from telethon.tl.types import MessageEntityCustomEmoji, MessageEntityTextUrl
+from telethon.tl.types import MessageEntityCustomEmoji
 from telsuit_core import get_config, logger
 from telsuit_cleaner import run_duplicate_check_for_event
 
@@ -47,12 +47,10 @@ async def start_enhancer(auto=False):
 
     # --- Actual emoji enhancement logic ---
     async def process_single_message(event):
-        """Enhance emojis, add clickable order link, and trigger cleaner when done."""
+        """Enhance emojis and trigger cleaner when done."""
         text = event.message.text
         if not text:
             return
-
-        msg = event.message
 
         try:
             parsed_text, parsed_entities = await client._parse_message_text(text, "md")
@@ -66,65 +64,28 @@ async def start_enhancer(auto=False):
             for m in re.finditer(re.escape(emoji), parsed_text):
                 matches.append((m.start(), m.end(), emoji, int(doc_id)))
 
-        # Check if message already has custom emoji entities
-        existing_custom_emojis = [
-            e for e in (msg.entities or []) 
-            if isinstance(e, MessageEntityCustomEmoji)
-        ]
-
-        # Check if "Order" link already exists in the text
-        has_order_link = "🛒 Order" in parsed_text or "Order" in parsed_text
-
-        needs_emoji_update = bool(matches) and not existing_custom_emojis
-        needs_order_link = not has_order_link
-
-        if not needs_emoji_update and not needs_order_link:
-            logger.debug(f"⏭️ Message {msg.id} already enhanced, skipping")
+        if not matches:
             return
 
-        # Build entities for custom emojis
+        matches.sort(key=lambda x: x[0])
         new_entities = []
-        if matches and needs_emoji_update:
-            matches.sort(key=lambda x: x[0])
-            for start, end, emoji, doc_id in matches:
-                prefix = parsed_text[:start]
-                offset = len(prefix.encode("utf-16-le")) // 2
-                length = len(emoji.encode("utf-16-le")) // 2
-                new_entities.append(
-                    MessageEntityCustomEmoji(
-                        offset=offset, length=length, document_id=doc_id
-                    )
+        for start, end, emoji, doc_id in matches:
+            prefix = parsed_text[:start]
+            offset = len(prefix.encode("utf-16-le")) // 2
+            length = len(emoji.encode("utf-16-le")) // 2
+            new_entities.append(
+                MessageEntityCustomEmoji(
+                    offset=offset, length=length, document_id=doc_id
                 )
-
-        # Add clickable "Order" link at the end (userbot-compatible method)
-        if needs_order_link:
-            # Add separator and order text
-            order_text = "\n\n🛒 Order"
-            new_text = parsed_text + order_text
-            
-            # Calculate offset for the order link
-            offset = len(parsed_text.encode("utf-16-le")) // 2 + 2  # +2 for \n\n
-            length = len("🛒 Order".encode("utf-16-le")) // 2
-            
-            # ⚠️ REPLACE THIS URL with your actual order link
-            order_url = "https://t.me/YourBotUsername"  
-            
-            # Create text URL entity (clickable link)
-            order_entity = MessageEntityTextUrl(
-                offset=offset,
-                length=length,
-                url=order_url
             )
-            new_entities.append(order_entity)
-        else:
-            new_text = parsed_text
 
-        # Combine all entities
         final_entities = (parsed_entities or []) + new_entities
         final_entities.sort(key=lambda e: e.offset)
 
+        msg = event.message
+
         try:
-            await event.edit(new_text, formatting_entities=final_entities)
+            await event.edit(parsed_text, formatting_entities=final_entities)
             logger.info(f"✅ Enhanced message {msg.id} in {event.chat.username}")
         except Exception as e:
             logger.error(f"❌ Failed editing message {msg.id}: {e}")
@@ -195,9 +156,11 @@ async def run_enhancer(auto=False):
 
 if __name__ == "__main__":
     import sys
+    # 'asyncio' is already imported at the top, removing the redundant import here fixes F811
 
     auto_mode = "--headless" in sys.argv
     try:
+        # The 'asyncio' module is available from the top-level import
         asyncio.run(start_enhancer(auto=auto_mode))
     except KeyboardInterrupt:
         print("🛑 TelSuit stopped by user.")
