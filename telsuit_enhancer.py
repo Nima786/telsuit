@@ -3,7 +3,7 @@ import asyncio
 from asyncio import Queue
 from telethon import TelegramClient, events
 from telethon.tl.types import MessageEntityCustomEmoji
-from telethon.tl.custom import Button  # ✅ NEW import
+from telethon.tl.custom import Button # ✅ NEW import
 from telsuit_core import get_config, logger
 from telsuit_cleaner import run_duplicate_check_for_event
 
@@ -34,7 +34,8 @@ async def add_order_button_if_product(client, event):
     product_id = match.group(1)
     order_url = f"https://t.me/homplast_salebot?start=product_{product_id}"
 
-     try:
+    # FIX: Corrected IndentationError here (Line 37 in the error log)
+    try:
         # re-fetch full message object to get entities
         full_msg = await client.get_messages(msg.peer_id, ids=msg.id)
     
@@ -175,7 +176,7 @@ async def start_enhancer(auto=False):
                 logger.error(f"Queue error: {e}")
             finally:
                 message_queue.task_done()
-                await asyncio.sleep(2)  # Delay between processing messages
+                await asyncio.sleep(2) # Delay between processing messages
 
     # --- Register event handlers ---
     for ch in config["channels"]:
