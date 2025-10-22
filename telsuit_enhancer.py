@@ -52,6 +52,8 @@ async def start_enhancer(auto=False):
         if not text:
             return
 
+        msg = event.message
+
         try:
             parsed_text, parsed_entities = await client._parse_message_text(text, "md")
         except TypeError:
@@ -64,8 +66,19 @@ async def start_enhancer(auto=False):
             for m in re.finditer(re.escape(emoji), parsed_text):
                 matches.append((m.start(), m.end(), emoji, int(doc_id)))
 
+        # Check if message already has custom emoji entities
+        existing_custom_emojis = [
+            e for e in (msg.entities or []) 
+            if isinstance(e, MessageEntityCustomEmoji)
+        ]
+
+        # Check if message already has buttons
+        has_buttons = msg.reply_markup is not None
+
         # Build entities for custom emojis
         new_entities = []
+        needs_emoji_update = bool(matches) and not existing_custom_emojis
+        
         if matches:
             matches.sort(key=lambda x: x[0])
             for start, end, emoji, doc_id in matches:
@@ -82,18 +95,25 @@ async def start_enhancer(auto=False):
         final_entities.sort(key=lambda e: e.offset)
 
         # Create inline "Order" button
-        # Customize the URL or use Button.inline() with callback_data for bot handling
+        # Replace URL with your actual order link or bot username
         order_button = [[Button.url("🛒 Order", url="https://t.me/YourBotUsername")]]
         
         # Alternative: Use inline button with callback (requires bot to handle)
         # order_button = [[Button.inline("🛒 Order", data=b"order_clicked")]]
 
-        msg = event.message
+        # Determine if we need to edit the message
+        needs_button_update = not has_buttons
+        needs_update = needs_emoji_update or needs_button_update
+
+        if not needs_update:
+            logger.debug(f"⏭️ Message {msg.id} already enhanced, skipping")
+            return
 
         try:
+            # Edit with both emojis and button
             await event.edit(
                 parsed_text, 
-                formatting_entities=final_entities,
+                formatting_entities=final_entities if new_entities else None,
                 buttons=order_button
             )
             logger.info(f"✅ Enhanced message {msg.id} in {event.chat.username}")
